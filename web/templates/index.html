@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOGIC-HALT</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <h1>LOGIC-HALT</h1>
+            </div>
+            <p class="subtitle">AI Hallucination Detection</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <button class="tab-btn active" onclick="switchTab('generate')">Cevap Uret & Analiz</button>
+            <button class="tab-btn" onclick="switchTab('check')">Cevap Kontrol</button>
+        </div>
+
+        <!-- Tab 1: Generate & Analyze (existing functionality) -->
+        <section id="tab-generate" class="input-section tab-content active">
+            <div class="input-card">
+                <h2>Cevap Uret & Analiz Et</h2>
+                <p class="description">Soru girin, LLM cevaplar uretsin, halusinasyon analizi yapilsin.</p>
+                <div class="input-group">
+                    <textarea id="question-input" placeholder="Sorunuzu yazın..."></textarea>
+                    <div class="input-actions">
+                        <select id="num-responses">
+                            <option value="5">5</option>
+                            <option value="10" selected>10</option>
+                            <option value="15">15</option>
+                        </select>
+                        <button id="analyze-btn" onclick="analyzeQuestion()">
+                            <span class="btn-text">Analiz Et</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab 2: Check Q&A (new functionality) -->
+        <section id="tab-check" class="input-section tab-content">
+            <div class="input-card">
+                <h2>Cevap Kontrol</h2>
+                <p class="description">Bir soru ve cevap girin. Sistemimiz bu cevabin halusinasyon olup olmadigini kontrol etsin.</p>
+                <div class="input-group">
+                    <label class="input-label">Soru:</label>
+                    <textarea id="qa-question-input" placeholder="Soruyu yazin..."></textarea>
+                </div>
+                <div class="input-group">
+                    <label class="input-label">Cevap (kontrol edilecek):</label>
+                    <textarea id="qa-answer-input" placeholder="Kontrol edilecek cevabi yazin..."></textarea>
+                </div>
+                <div class="input-actions">
+                    <button id="check-btn" onclick="checkQA()">
+                        <span class="btn-text">Kontrol Et</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Q&A Check Result Section -->
+        <section id="qa-result-section" class="qa-result-section hidden">
+            <div class="qa-result-card">
+                <div id="qa-verdict" class="qa-verdict"></div>
+                <div class="qa-metrics-grid">
+                    <div class="qa-metric">
+                        <span class="qa-metric-label">Risk Skoru</span>
+                        <span class="qa-metric-value" id="qa-risk">-</span>
+                    </div>
+                    <div class="qa-metric">
+                        <span class="qa-metric-label">Tutarlilik</span>
+                        <span class="qa-metric-value" id="qa-consistency">-</span>
+                    </div>
+                    <div class="qa-metric">
+                        <span class="qa-metric-label">Entropi</span>
+                        <span class="qa-metric-value" id="qa-entropy">-</span>
+                    </div>
+                    <div class="qa-metric">
+                        <span class="qa-metric-label">NCD</span>
+                        <span class="qa-metric-value" id="qa-ncd">-</span>
+                    </div>
+                </div>
+                <div class="qa-explanation" id="qa-explanation"></div>
+                <div class="qa-variants">
+                    <h4>LLM Karsilastirma Cevaplari:</h4>
+                    <div id="qa-variants-list"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="loading-section" class="loading-section hidden">
+            <div class="loader"></div>
+            <p>Analiz ediliyor...</p>
+            <p class="loading-sub">15-30 saniye surebilir</p>
+        </section>
+
+        <section id="results-section" class="results-section hidden">
+            <div class="export-section">
+                <button id="export-btn" onclick="exportResults()" class="export-btn">
+                    <span>Kopyala</span>
+                </button>
+                <button id="save-btn" onclick="saveLabels()" class="export-btn save-btn">
+                    <span>Kaydet</span>
+                </button>
+                <span id="export-status" class="export-status"></span>
+            </div>
+
+            <div class="ground-truth-section">
+                <h3>Manuel Etiketleme</h3>
+                <p class="label-info">Her cevap icin gercek durumu isaretleyin:</p>
+            </div>
+
+            <div class="summary-card">
+                <h2>Ozet</h2>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <span class="summary-value" id="total-responses">0</span>
+                        <span class="summary-label">Toplam</span>
+                    </div>
+                    <div class="summary-item safe">
+                        <span class="summary-value" id="safe-count">0</span>
+                        <span class="summary-label">Guvenli</span>
+                    </div>
+                    <div class="summary-item hallucination">
+                        <span class="summary-value" id="hallucination-count">0</span>
+                        <span class="summary-label">Halusinasyon</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-value" id="avg-risk">0%</span>
+                        <span class="summary-label">Ort. Risk</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="responses-header">
+                <h2>Cevaplar</h2>
+                <div class="filter-buttons">
+                    <button class="filter-btn active" onclick="filterResponses('all')">Tumu</button>
+                    <button class="filter-btn" onclick="filterResponses('safe')">Guvenli</button>
+                    <button class="filter-btn" onclick="filterResponses('hallucination')">Halusinasyon</button>
+                </div>
+            </div>
+
+            <div id="responses-container" class="responses-container"></div>
+        </section>
+
+        <footer class="footer">
+            <p>LOGIC-HALT</p>
+            <p class="footer-sub">Gebze Teknik Universitesi - 2026</p>
+            <p class="footer-sub">Omer Faruk Sener | Danisman: Dr. Tulay AYYILDIZ</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

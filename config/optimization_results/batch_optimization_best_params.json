@@ -1,0 +1,17 @@
+{
+  "alpha": 0.6384898725795404,
+  "beta": 0.05806956910136386,
+  "gamma": 0.07523515693545255,
+  "hallucination_threshold": 0.48630381372385045,
+  "min_edge_weight": 0.4029282510615426,
+  "contradiction_weight": 0.5010038284154706,
+  "neutral_weight": 0.24904638353489894,
+  "entropy_max": 6.34372892362546,
+  "ncd_max": 0.9105398552884115,
+  "delta": 0.22820540138364323,
+  "best_f1_score": 0.7724317295188556,
+  "n_trials": 1000,
+  "timestamp": "20260202_011443",
+  "n_questions": 817,
+  "fusion_type": "4-weight with GT contradiction"
+}

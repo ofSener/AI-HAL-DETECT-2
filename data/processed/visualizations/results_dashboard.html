@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOGIC-HALT Results Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .card h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .metric {
+            background: rgba(255,255,255,0.08);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .metric .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .metric .label { color: #aaa; margin-top: 5px; }
+        .metric .change { color: #4ade80; font-size: 0.9em; margin-top: 5px; }
+        .chart-container { position: relative; height: 300px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        th { color: #00d4ff; }
+        .highlight { color: #4ade80; font-weight: bold; }
+        .confusion-matrix {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr;
+            gap: 5px;
+            margin-top: 15px;
+        }
+        .cm-cell {
+            padding: 20px;
+            text-align: center;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .cm-header { background: rgba(0,212,255,0.2); }
+        .cm-tn { background: rgba(74,222,128,0.3); }
+        .cm-fp { background: rgba(251,146,60,0.3); }
+        .cm-fn { background: rgba(251,146,60,0.3); }
+        .cm-tp { background: rgba(74,222,128,0.5); }
+        .cm-label { display: flex; align-items: center; justify-content: center; font-size: 0.9em; }
+        .comparison-bar {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .bar-label { width: 120px; }
+        .bar-container { flex: 1; height: 30px; background: rgba(255,255,255,0.1); border-radius: 15px; overflow: hidden; position: relative; }
+        .bar-old { position: absolute; height: 100%; background: #ef4444; border-radius: 15px; }
+        .bar-new { position: absolute; height: 100%; background: #4ade80; border-radius: 15px; opacity: 0.8; }
+        .bar-value { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 0.85em; }
+        .footer { text-align: center; margin-top: 30px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 LOGIC-HALT Hallucination Detection Results</h1>
+
+        <!-- Metrics Overview -->
+        <div class="grid">
+            <div class="card">
+                <h2>📊 Performance Metrics</h2>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="value">0.7730</div>
+                        <div class="label">F1 Score</div>
+                        <div class="change">↑ +67% vs Cosine</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">0.9770</div>
+                        <div class="label">Precision</div>
+                        <div class="change">↑ +174% vs Cosine</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">0.6395</div>
+                        <div class="label">Recall</div>
+                        <div class="change">~ -2% vs Cosine</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value">0.7858</div>
+                        <div class="label">Accuracy</div>
+                        <div class="change">↑ +11% vs Cosine</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🎯 Confusion Matrix</h2>
+                <div class="confusion-matrix">
+                    <div class="cm-cell"></div>
+                    <div class="cm-cell cm-header">Pred: Truthful</div>
+                    <div class="cm-cell cm-header">Pred: Halluc.</div>
+
+                    <div class="cm-cell cm-label">Actual: Truthful</div>
+                    <div class="cm-cell cm-tn">344<br><small>True Negative</small></div>
+                    <div class="cm-cell cm-fp">7<br><small>False Positive</small></div>
+
+                    <div class="cm-cell cm-label">Actual: Halluc.</div>
+                    <div class="cm-cell cm-fn">168<br><small>False Negative</small></div>
+                    <div class="cm-cell cm-tp">298<br><small>True Positive</small></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison Charts -->
+        <div class="grid" style="margin-top: 20px;">
+            <div class="card">
+                <h2>📈 Old (Cosine) vs New (NLI) Comparison</h2>
+                <div class="comparison-bar">
+                    <div class="bar-label">F1 Score</div>
+                    <div class="bar-container">
+                        <div class="bar-old" style="width: 46.09%;"></div>
+                        <div class="bar-new" style="width: 77.30%;"></div>
+                        <div class="bar-value">0.46 → 0.77</div>
+                    </div>
+                </div>
+                <div class="comparison-bar">
+                    <div class="bar-label">Precision</div>
+                    <div class="bar-container">
+                        <div class="bar-old" style="width: 35.64%;"></div>
+                        <div class="bar-new" style="width: 97.70%;"></div>
+                        <div class="bar-value">0.36 → 0.98</div>
+                    </div>
+                </div>
+                <div class="comparison-bar">
+                    <div class="bar-label">Recall</div>
+                    <div class="bar-container">
+                        <div class="bar-old" style="width: 65.19%;"></div>
+                        <div class="bar-new" style="width: 63.95%;"></div>
+                        <div class="bar-value">0.65 → 0.64</div>
+                    </div>
+                </div>
+                <div class="comparison-bar">
+                    <div class="bar-label">Accuracy</div>
+                    <div class="bar-container">
+                        <div class="bar-old" style="width: 70.50%;"></div>
+                        <div class="bar-new" style="width: 78.58%;"></div>
+                        <div class="bar-value">0.71 → 0.79</div>
+                    </div>
+                </div>
+                <p style="margin-top: 15px; color: #aaa; font-size: 0.9em;">
+                    🔴 Eski (Cosine Similarity) &nbsp;&nbsp; 🟢 Yeni (NLI Entailment)
+                </p>
+            </div>
+
+            <div class="card">
+                <h2>⚖️ Fusion Layer Weights</h2>
+                <div class="chart-container">
+                    <canvas id="weightsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Research Comparison -->
+        <div class="card" style="margin-top: 20px;">
+            <h2>🏆 Comparison with State-of-the-Art Research</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Method / Paper</th>
+                        <th>Venue</th>
+                        <th>F1 Score</th>
+                        <th>Precision</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="highlight">
+                        <td>🔥 LOGIC-HALT (Ours)</td>
+                        <td>2026</td>
+                        <td class="highlight">0.7730</td>
+                        <td class="highlight">0.9770</td>
+                        <td>NLI-based labels + DeBERTa-v3-Large</td>
+                    </tr>
+                    <tr>
+                        <td>DrHall (Metamorphic Testing)</td>
+                        <td>FSE 2025</td>
+                        <td>0.856</td>
+                        <td>-</td>
+                        <td>Best overall, requires execution paths</td>
+                    </tr>
+                    <tr>
+                        <td>LettuceDetect</td>
+                        <td>arXiv 2025</td>
+                        <td>0.792</td>
+                        <td>-</td>
+                        <td>Token-level, RAG-focused</td>
+                    </tr>
+                    <tr>
+                        <td>MetaQA</td>
+                        <td>FSE 2025</td>
+                        <td>0.584</td>
+                        <td>0.699</td>
+                        <td>Metamorphic relations, no external resources</td>
+                    </tr>
+                    <tr>
+                        <td>RelD (ELECTRA)</td>
+                        <td>CIKM 2023</td>
+                        <td>-</td>
+                        <td>0.881</td>
+                        <td>Multi-stage classification</td>
+                    </tr>
+                    <tr>
+                        <td>SelfCheckGPT</td>
+                        <td>2023</td>
+                        <td>0.403</td>
+                        <td>0.625</td>
+                        <td>Baseline consistency method</td>
+                    </tr>
+                    <tr>
+                        <td>GRATH (TruthfulQA SOTA)</td>
+                        <td>2024</td>
+                        <td>-</td>
+                        <td>MC2: 0.691</td>
+                        <td>Fine-tuning approach</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Configuration -->
+        <div class="grid" style="margin-top: 20px;">
+            <div class="card">
+                <h2>⚙️ Optimal Configuration</h2>
+                <table>
+                    <tr><td>NLI Model</td><td class="highlight">cross-encoder/nli-deberta-v3-large (435M)</td></tr>
+                    <tr><td>Label Model</td><td class="highlight">microsoft/deberta-large-mnli</td></tr>
+                    <tr><td>α (GT Contradiction)</td><td>0.6161</td></tr>
+                    <tr><td>β (Inconsistency)</td><td>0.0658</td></tr>
+                    <tr><td>γ (Entropy)</td><td>0.2988</td></tr>
+                    <tr><td>δ (NCD)</td><td>0.0194</td></tr>
+                    <tr><td>Threshold</td><td>0.5216</td></tr>
+                    <tr><td>Trials</td><td>500 (Bayesian Optimization)</td></tr>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>📋 Dataset Summary</h2>
+                <table>
+                    <tr><td>Dataset</td><td class="highlight">TruthfulQA</td></tr>
+                    <tr><td>Total Questions</td><td>817</td></tr>
+                    <tr><td>Hallucinations (NLI)</td><td>466 (57.0%)</td></tr>
+                    <tr><td>Truthful</td><td>351 (43.0%)</td></tr>
+                    <tr><td>Avg Entailment Score</td><td>0.406</td></tr>
+                    <tr><td>NLI Pairs Analyzed</td><td>12,255</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Generated by LOGIC-HALT | RTX 5070 Optimized | 2026-02-02</p>
+        </div>
+    </div>
+
+    <script>
+        // Fusion Weights Pie Chart
+        new Chart(document.getElementById('weightsChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['GT Contradiction (α)', 'Inconsistency (β)', 'Entropy (γ)', 'NCD (δ)'],
+                datasets: [{
+                    data: [61.61, 6.58, 29.88, 1.94],
+                    backgroundColor: ['#ef4444', '#22d3ee', '#a855f7', '#4ade80'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: '#fff', padding: 15 }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

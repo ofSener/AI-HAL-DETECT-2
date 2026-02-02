@@ -1,0 +1,34 @@
+# ===========================================
+# LOGIC-HALT Requirements
+# RTX 5070 (CUDA 12.x) için optimize edildi
+# ===========================================
+
+# Core ML/NLP (CUDA destekli)
+torch>=2.1.0
+transformers>=4.35.0
+sentence-transformers>=2.2.2
+
+# Bayesian Optimization
+optuna>=3.4.0
+
+# API Clients
+openai>=1.3.0
+anthropic>=0.7.0
+
+# Graph & Data Processing
+networkx>=3.2
+numpy>=1.24.3
+pandas>=2.0.3
+scikit-learn>=1.3.0
+
+# Visualization
+matplotlib>=3.7.2
+seaborn>=0.12.2
+
+# Configuration & Utils
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+tqdm>=4.66.1
+
+# Testing (optional)
+pytest>=7.4.3

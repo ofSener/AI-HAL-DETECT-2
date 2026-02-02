@@ -1,0 +1,148 @@
+# LOGIC-HALT Configuration File
+# RTX 5070 (12GB VRAM) + Ryzen 5 7500F + 32GB DDR5 için optimize edildi
+
+# ========================================
+# HARDWARE Settings (RTX 5070 Optimized)
+# ========================================
+hardware:
+  device: "cuda"
+  mixed_precision: true  # FP16 - 2x faster, half memory
+  num_workers: 8
+  pin_memory: true  # Faster CPU->GPU transfer
+  persistent_workers: true
+
+  # Batch sizes for 12GB VRAM
+  batch_size_nli: 128      # NLI inference
+  batch_size_embedding: 256  # Sentence embeddings
+
+  # CUDA optimizations
+  cudnn_benchmark: true  # Auto-tune convolutions
+  allow_tf32: true       # Tensor core acceleration
+
+
+# ========================================
+# MORPHER (Module A) Settings
+# ========================================
+morpher:
+  num_variants: 5
+  temperature: 0.7
+  max_tokens: 500
+
+  transformations:
+    paraphrase: true
+    negation: true
+    variable_substitution: true
+    premise_reordering: true
+    redundant_context: true
+
+  similarity_threshold: 0.75
+  model: "gpt-4o-mini"
+
+
+# ========================================
+# INTERROGATOR (Module B) Settings
+# ========================================
+interrogator:
+  target_models:
+    - "gpt-4o-mini"
+
+  temperature: 0.6
+  max_tokens: 400
+  return_logprobs: true
+  n_samples: 1
+
+
+# ========================================
+# CONSISTENCY ENGINE (Module C) Settings
+# ========================================
+consistency:
+  # UPGRADED: Large model for better accuracy
+  nli_model: "cross-encoder/nli-deberta-v3-large"  # 435M params
+  label_model: "microsoft/deberta-large-mnli"       # For NLI-based labeling
+  batch_size: 64  # RTX 5070 12GB VRAM için optimize (large model)
+
+  # NLI label weights (Bayesian optimized - 500 trials, F1=0.7730)
+  contradiction_weight: 0.6353
+  neutral_weight: 0.6432
+  entailment_weight: 0.0
+
+  # Graph analysis
+  min_edge_weight: 0.5551
+
+
+# ========================================
+# COMPLEXITY ENGINE (Module D) Settings
+# ========================================
+complexity:
+  compression_algorithm: "zlib"
+  entropy_method: "token"
+  ncd_bounds: [0.0, 0.7978]   # Optimized ncd_max
+  entropy_bounds: [0.0, 6.29]  # Optimized entropy_max
+
+
+# ========================================
+# FUSION LAYER (Module E) Settings
+# 4-weight fusion with GT contradiction as PRIMARY signal
+# OPTIMIZED: Bayesian optimization with 500 trials
+# RESULT: F1=0.7730, Precision=0.9770, Recall=0.6395
+# ========================================
+fusion:
+  alpha: 0.6161   # GT Contradiction weight (PRIMARY - compares response to ground truth)
+  beta: 0.0658    # Inconsistency weight (self-consistency between variants)
+  gamma: 0.2988   # Entropy weight
+  delta: 0.0194   # NCD weight
+
+  hallucination_threshold: 0.5216
+  safe_threshold: 0.30
+  suspicious_threshold: 0.40
+
+  high_confidence: 0.70
+  low_confidence: 0.35
+
+
+# ========================================
+# ANSWER VALIDATOR (Module F) Settings
+# ========================================
+answer_validator:
+  minority_penalty: 0.05
+  min_responses: 3
+  high_confidence_threshold: 0.80
+  low_confidence_threshold: 0.50
+
+
+# ========================================
+# DATASET Settings
+# ========================================
+dataset:
+  truthfulqa_path: "data/raw/truthfulqa_dataset.json"
+  pilot_path: "data/raw/pilot_dataset.json"
+  output_dir: "data/processed/results"
+
+
+# ========================================
+# OPTIMIZATION Settings (Bayesian)
+# Last optimization: 2026-02-02
+# ========================================
+optimization:
+  n_trials: 500
+  n_startup_trials: 15  # Random trials before TPE
+  n_cv_folds: 5
+  timeout_hours: 6
+
+  # Optuna parallelization
+  n_jobs: 1  # Sequential (API rate limits)
+
+  # Best results achieved:
+  best_f1_score: 0.7730
+  best_precision: 0.9770
+  best_recall: 0.6395
+  best_accuracy: 0.7858
+
+
+# ========================================
+# LOGGING
+# ========================================
+logging:
+  level: "INFO"
+  save_intermediate: false  # Disable for speed
+  log_file: "logs/optimization.log"

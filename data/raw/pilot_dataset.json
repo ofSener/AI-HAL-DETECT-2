@@ -1,0 +1,162 @@
+[
+  {
+    "id": "logic_001",
+    "category": "Syllogism",
+    "difficulty": "easy",
+    "question": "All humans are mortal. Socrates is a human. Is Socrates mortal?",
+    "ground_truth": "Yes",
+    "expected_reasoning": "Classic Barbara syllogism: All A are B, C is A, therefore C is B"
+  },
+  {
+    "id": "logic_002",
+    "category": "Syllogism",
+    "difficulty": "easy",
+    "question": "No fish are mammals. All whales are mammals. Are whales fish?",
+    "ground_truth": "No",
+    "expected_reasoning": "No A are B, All C are B, therefore C cannot be A"
+  },
+  {
+    "id": "logic_003",
+    "category": "Syllogism",
+    "difficulty": "easy",
+    "question": "All birds can fly. Penguins are birds. Can penguins fly?",
+    "ground_truth": "Invalid premise - actually penguins cannot fly",
+    "expected_reasoning": "This tests if LLM recognizes faulty premises vs. pure logic"
+  },
+  {
+    "id": "logic_004",
+    "category": "Syllogism",
+    "difficulty": "medium",
+    "question": "Some cats are not friendly. All friendly animals make good pets. Do all cats make good pets?",
+    "ground_truth": "No",
+    "expected_reasoning": "If some cats are not friendly, and only friendly animals make good pets, then not all cats make good pets"
+  },
+  {
+    "id": "logic_005",
+    "category": "Syllogism",
+    "difficulty": "medium",
+    "question": "All lawyers are graduates. Some graduates are rich. Are all lawyers rich?",
+    "ground_truth": "Cannot be determined",
+    "expected_reasoning": "This is a classic invalid inference (affirming the consequent)"
+  },
+  {
+    "id": "logic_006",
+    "category": "Syllogism",
+    "difficulty": "medium",
+    "question": "No reptiles are warm-blooded. All snakes are reptiles. Are any snakes warm-blooded?",
+    "ground_truth": "No",
+    "expected_reasoning": "No A are B, All C are A, therefore no C are B"
+  },
+  {
+    "id": "logic_007",
+    "category": "Syllogism",
+    "difficulty": "hard",
+    "question": "All politicians are public figures. Some public figures are not trustworthy. Some trustworthy people are not politicians. Can we conclude that some politicians are trustworthy?",
+    "ground_truth": "Cannot be determined",
+    "expected_reasoning": "This requires tracking multiple overlapping sets and recognizing insufficient information"
+  },
+  {
+    "id": "logic_008",
+    "category": "Syllogism",
+    "difficulty": "hard",
+    "question": "Every student who studies hard passes. John did not pass. Did John study hard?",
+    "ground_truth": "No",
+    "expected_reasoning": "Modus tollens: If P then Q, not Q, therefore not P"
+  },
+  {
+    "id": "logic_009",
+    "category": "Syllogism",
+    "difficulty": "hard",
+    "question": "All roses in the garden are red. Some flowers in the garden are not roses. Are all red flowers in the garden roses?",
+    "ground_truth": "Cannot be determined",
+    "expected_reasoning": "We know all roses are red, but there might be other red flowers"
+  },
+  {
+    "id": "logic_010",
+    "category": "Syllogism",
+    "difficulty": "hard",
+    "question": "If it rains, the ground gets wet. The ground is wet. Did it rain?",
+    "ground_truth": "Cannot be determined",
+    "expected_reasoning": "Affirming the consequent fallacy - ground could be wet from other sources"
+  },
+  {
+    "id": "logic_011",
+    "category": "Propositional Logic",
+    "difficulty": "medium",
+    "question": "Given: P → Q (If P then Q), Q → R (If Q then R). If P is true, is R true?",
+    "ground_truth": "Yes",
+    "expected_reasoning": "Hypothetical syllogism: P→Q, Q→R, therefore P→R"
+  },
+  {
+    "id": "logic_012",
+    "category": "Propositional Logic",
+    "difficulty": "medium",
+    "question": "Given: P ∨ Q (P or Q is true), ¬P (P is false). What can we conclude about Q?",
+    "ground_truth": "Q must be true",
+    "expected_reasoning": "Disjunctive syllogism: P∨Q, ¬P, therefore Q"
+  },
+  {
+    "id": "logic_013",
+    "category": "Propositional Logic",
+    "difficulty": "hard",
+    "question": "Given: (P → Q) ∧ (R → S), P ∨ R is true, Q is false. What can we conclude about R and S?",
+    "ground_truth": "R must be true, and S must be true",
+    "expected_reasoning": "If Q is false and P→Q, then P must be false. Since P∨R and P is false, R must be true. Since R is true and R→S, S must be true."
+  },
+  {
+    "id": "logic_014",
+    "category": "First-Order Logic",
+    "difficulty": "medium",
+    "question": "∀x(Dog(x) → HasTail(x)). Buddy is a dog. Does Buddy have a tail?",
+    "ground_truth": "Yes",
+    "expected_reasoning": "Universal instantiation: All dogs have tails, Buddy is a dog, therefore Buddy has a tail"
+  },
+  {
+    "id": "logic_015",
+    "category": "First-Order Logic",
+    "difficulty": "hard",
+    "question": "∀x(Human(x) → Mortal(x)), ∃x(Greek(x) ∧ Human(x)). Is there a Greek person who is mortal?",
+    "ground_truth": "Yes",
+    "expected_reasoning": "There exists a Greek human, all humans are mortal, therefore there exists a mortal Greek"
+  },
+  {
+    "id": "logic_016",
+    "category": "First-Order Logic",
+    "difficulty": "hard",
+    "question": "∀x∀y(Taller(x,y) → ¬Taller(y,x)). If John is taller than Mary, can Mary be taller than John?",
+    "ground_truth": "No",
+    "expected_reasoning": "The relation is antisymmetric by definition"
+  },
+  {
+    "id": "logic_017",
+    "category": "Puzzle",
+    "difficulty": "hard",
+    "question": "In a room, there are three people: A, B, and C. A says 'B is lying.' B says 'C is lying.' C says 'Both A and B are lying.' If only one person is telling the truth, who is it?",
+    "ground_truth": "B is telling the truth",
+    "expected_reasoning": "If A is truthful, B is lying, so C is truthful (contradiction). If C is truthful, A and B are lying, but then A's statement about B would be true (contradiction). If B is truthful, C is lying, which means at least one of A or B is truthful. A says B is lying (false), so A is lying. This is consistent."
+  },
+  {
+    "id": "logic_018",
+    "category": "Puzzle",
+    "difficulty": "hard",
+    "question": "All members of the club are either athletes or musicians. No athlete is a musician. Sarah is in the club but is not an athlete. Is Sarah a musician?",
+    "ground_truth": "Yes",
+    "expected_reasoning": "Exclusive categories: athlete XOR musician. Sarah is not athlete, therefore must be musician."
+  },
+  {
+    "id": "logic_019",
+    "category": "Negation",
+    "difficulty": "medium",
+    "question": "The statement is: 'It is not true that all birds can fly.' Which of the following is logically equivalent? A) No birds can fly. B) Some birds cannot fly. C) All birds cannot fly.",
+    "ground_truth": "B) Some birds cannot fly",
+    "expected_reasoning": "¬∀x(Bird(x) → Fly(x)) ≡ ∃x(Bird(x) ∧ ¬Fly(x))"
+  },
+  {
+    "id": "logic_020",
+    "category": "Contrapositive",
+    "difficulty": "medium",
+    "question": "Given: 'If an animal is a cat, then it is a mammal.' What is the logically equivalent contrapositive?",
+    "ground_truth": "If an animal is not a mammal, then it is not a cat",
+    "expected_reasoning": "P→Q is equivalent to ¬Q→¬P"
+  }
+]

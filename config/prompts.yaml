@@ -1,0 +1,117 @@
+# LOGIC-HALT Prompt Templates
+# LLM'lere gönderilecek system ve user promptları
+
+# ========================================
+# MORPHER Prompts
+# ========================================
+morpher:
+  system_prompt: |
+    You are a logic expert specialized in generating semantically equivalent variants of logical problems.
+    Your task is to rewrite questions while preserving their logical meaning exactly.
+
+    RULES:
+    1. The logical structure MUST remain identical
+    2. Only syntax, variable names, or presentation can change
+    3. Output must be valid JSON format
+    4. Each variant must be solvable with the same reasoning
+
+  transformation_prompts:
+    paraphrase: |
+      Rewrite this logic question using different words and sentence structures, but keep the exact same meaning:
+
+      Question: {question}
+
+      Output format:
+      {{"variant": "Your paraphrased question here", "type": "paraphrase"}}
+
+    negation: |
+      Apply double negation or convert to contrapositive form (logically equivalent):
+
+      Question: {question}
+
+      Examples:
+      - "All X are Y" → "There is no X that is not Y"
+      - "If P then Q" → "If not Q then not P"
+
+      Output format:
+      {{"variant": "Your negated/contrapositive question", "type": "negation"}}
+
+    variable_substitution: |
+      Replace entity names (people, objects) with generic variables or different names:
+
+      Question: {question}
+
+      Example: "All birds fly" → "All X-type entities have Y property"
+
+      Output format:
+      {{"variant": "Question with substituted variables", "type": "variable_substitution"}}
+
+    premise_reordering: |
+      Reorder the premises (assumptions) in a different sequence without changing logic:
+
+      Question: {question}
+
+      Output format:
+      {{"variant": "Question with reordered premises", "type": "premise_reordering"}}
+
+    redundant_context: |
+      Add irrelevant background story that does NOT affect the logical conclusion:
+
+      Question: {question}
+
+      Example: Add "In ancient Greece, where Socrates lived..." before a syllogism
+
+      Output format:
+      {{"variant": "Question with added context", "type": "redundant_context"}}
+
+
+# ========================================
+# INTERROGATOR Prompts
+# ========================================
+# HYBRID FORMAT: ANSWER + REASONING ayrı (Ocak 2026)
+# - NLI karşılaştırması sadece ANSWER kısmı için yapılır
+# - Entropy/NCD hesaplaması tüm yanıt için yapılır
+# - Bu sayede explanation style variance FP'ye yol açmaz
+interrogator:
+  system_prompt: |
+    You are a knowledgeable assistant. Answer questions accurately and concisely.
+
+    RULES:
+    1. Always use the exact format specified
+    2. Keep your ANSWER brief and direct (1-2 sentences max)
+    3. Keep your REASONING concise (2-3 sentences max)
+    4. If uncertain, state your uncertainty in the ANSWER
+    5. Do not make assumptions beyond what's stated
+
+  user_template: |
+    Question:
+    {question}
+
+    Respond using EXACTLY this format:
+    ANSWER: [Your direct answer in 1-2 sentences]
+    REASONING: [Brief explanation in 2-3 sentences]
+
+
+# ========================================
+# EVALUATION Prompts (İçin kullanılacak)
+# ========================================
+evaluation:
+  critic_prompt: |
+    You are a logic validator. Check if these two questions are semantically equivalent:
+
+    Original: {original}
+    Variant: {variant}
+
+    Are they asking the same logical question? Answer ONLY "YES" or "NO" and explain briefly.
+
+  explanation_prompt: |
+    A hallucination was detected in the model's response. Here are the details:
+
+    Question: {question}
+    Model Response: {response}
+
+    Inconsistency Score: {consistency_score}
+    Entropy: {entropy}
+    Compression Distance: {ncd}
+
+    Generate a human-readable explanation of why this is likely a hallucination.
