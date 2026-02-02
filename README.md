@@ -520,7 +520,7 @@ If you use LOGIC-HALT in your research, please cite:
 
 ```bibtex
 @software{sener2026logichalt,
-  author = {Şener, Ömer Faruk},{Dr. Tülay AYYILDIZ},
+  author = {Şener, Ömer Faruk and Ayyıldız, Tülay},
   title = {LOGIC-HALT: Multi-Signal LLM Hallucination Detection with Bayesian-Optimized Fusion},
   year = {2026},
   institution = {Gebze Technical University},
