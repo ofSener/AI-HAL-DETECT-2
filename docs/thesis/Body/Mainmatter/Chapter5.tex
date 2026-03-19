@@ -1,0 +1,285 @@
+\chapter{Results and Discussion}
+
+This chapter presents the experimental results of the LOGIC-HALT system on the TruthfulQA benchmark (817 questions), analyzes the impact of the ground truth correction, reports the ablation study findings, and discusses limitations.
+
+\section{Ground Truth Contradiction: Discovery and Correction}
+
+During the development of LOGIC-HALT, we discovered a critical methodological issue in the original evaluation pipeline. The system's primary signal---termed ``GT Contradiction''---was computed by comparing the LLM's response against the known ground-truth answer using NLI:
+
+\begin{equation}
+    \text{GT\_Risk} = 0.7 \cdot P_{con}(R, GT) + 0.3 \cdot (1 - P_{ent}(R, GT))
+\end{equation}
+
+where $P_{con}$ and $P_{ent}$ denote the contradiction and entailment probabilities from the NLI model, $R$ is the LLM response, and $GT$ is the ground-truth answer.
+
+This signal accounted for 63.8\% of the fusion weight in the original 4-signal system and was the primary driver of the reported metrics (F1 = 0.773, Precision = 0.977). However, the GT Contradiction signal requires knowledge of the correct answer at inference time---which is precisely what the system is supposed to determine. In any real-world deployment, the correct answer is not available; if it were, a hallucination detector would be unnecessary.
+
+\subsection{Impact of the Correction}
+
+Table~\ref{tab:gt_correction} compares the original GT-based system with the corrected 5-signal system.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Impact of removing ground truth dependency.}
+    \label{tab:gt_correction}
+    \begin{tabular}{lccccc}
+        \toprule
+        System & Signals & Precision & Recall & F1 & GT Required \\
+        \midrule
+        Original (GT-based) & 4 & 0.977 & 0.640 & 0.773 & Yes \\
+        Corrected (5-signal, precision-balanced) & 5 & 0.602 & 0.917 & 0.727 & \textbf{No} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The corrected system achieves an F1 score of 0.727 (precision-balanced optimization, 1000 trials)---a reduction of 0.046 from the GT-based system---while operating entirely without ground-truth information at inference time. Notably, recall increased from 0.640 to 0.917, meaning the corrected system detects substantially more actual hallucinations, though at the cost of reduced precision (0.977 $\rightarrow$ 0.602). When optimized purely for F1 without precision constraints, the system achieves F1 = 0.735 but with recall = 1.000 and precision = 0.581, essentially flagging all responses as hallucinations.
+
+\section{Five-Signal System Results}
+
+\subsection{Standard F1 Optimization}
+
+Using Bayesian optimization with 500 trials, the system achieved the following results on TruthfulQA (817 questions):
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Five-signal system performance (F1-optimized, 500 trials).}
+    \label{tab:5sig_results}
+    \begin{tabular}{lc}
+        \toprule
+        Metric & Value \\
+        \midrule
+        Total Questions & 817 \\
+        Hallucinations in Dataset & 472 (57.8\%) \\
+        \midrule
+        F1 Score & \textbf{0.7346} \\
+        Precision & 0.5806 \\
+        Recall & 1.0000 \\
+        Accuracy & 0.5826 \\
+        \midrule
+        True Positives & 472 \\
+        False Positives & 341 \\
+        False Negatives & 0 \\
+        True Negatives & 4 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The system achieves perfect recall (1.000) but low precision (0.581), indicating that the optimizer found the ``flag everything'' strategy to maximize F1 given the dataset's class distribution (57.8\% hallucinations).
+
+\subsection{Precision-Balanced Optimization}
+
+To address the precision deficit, we re-optimized with a precision-penalized objective function that discounts F1 when precision falls below 0.60:
+
+\begin{equation}
+    \text{Objective} = \begin{cases}
+        F1 \cdot \frac{P}{0.60} & \text{if } P < 0.60 \\
+        F1 \cdot (1 + 0.15 \cdot \min(P - 0.60, 0.35)) & \text{otherwise}
+    \end{cases}
+\end{equation}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Precision-balanced optimization results (1000 trials).}
+    \label{tab:balanced}
+    \begin{tabular}{lcc}
+        \toprule
+        Metric & F1-Optimized & Precision-Balanced \\
+        \midrule
+        Precision & 0.581 & \textbf{0.602} \\
+        Recall & \textbf{1.000} & 0.917 \\
+        F1 & \textbf{0.735} & 0.727 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Precision-balanced optimization yields a modest improvement in precision (0.581 $\rightarrow$ 0.602) with a controlled decrease in recall (1.000 $\rightarrow$ 0.917).
+
+\section{Bayesian Optimization Results}
+
+\subsection{Optimized Signal Weights}
+
+Table~\ref{tab:weights} presents the Bayesian-optimized weights for the 5-signal fusion system.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Optimized 5-signal fusion weights (500 trials, TruthfulQA).}
+    \label{tab:weights}
+    \begin{tabular}{llc}
+        \toprule
+        Signal & Description & Weight \\
+        \midrule
+        Minority Penalty ($w_5$) & Answer-level majority voting & \textbf{0.3919} \\
+        Inconsistency ($w_2$) & NLI-based self-consistency & 0.2120 \\
+        NCD ($w_4$) & Pairwise compression distance & 0.1616 \\
+        Entropy ($w_3$) & Token-level uncertainty & 0.1493 \\
+        Self-Verification ($w_1$) & Original vs. variant NLI & 0.0852 \\
+        \midrule
+        \multicolumn{2}{l}{Decision Threshold ($\tau$)} & 0.2848 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+A surprising finding is that \textbf{Minority Penalty} emerges as the dominant signal with 39.19\% of the total weight. This indicates that answer-level majority voting---a relatively simple signal based on regex-based answer extraction---is more discriminative than NLI-based consistency analysis (21.20\%) or information-theoretic metrics (entropy 14.93\%, NCD 16.16\%). Self-Verification receives the lowest weight (8.52\%), suggesting that comparing original and variant responses via NLI provides limited additional information beyond what the consistency analysis already captures.
+
+\subsection{Optimization Convergence}
+
+The Bayesian optimizer converged rapidly, achieving near-optimal F1 within the first 100 trials:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Optimization convergence.}
+    \begin{tabular}{lc}
+        \toprule
+        Trial & Best F1 \\
+        \midrule
+        Trial 3 & 0.7324 \\
+        Trial 50 & 0.7340 \\
+        Trial 114 & 0.7346 \\
+        Trial 500 & 0.7346 (converged) \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The rapid convergence demonstrates the efficiency of the TPE sampler for this optimization problem.
+
+\section{Ablation Study}
+
+To evaluate the contribution of each signal, we conducted an ablation study testing three additional signals across all 8 combinations (500 trials per configuration):
+
+\begin{enumerate}
+    \item \textbf{Negation Contradiction (Neg):} NLI entailment between original and negation-variant responses. If the model agrees with both a claim and its negation, this indicates logical inconsistency.
+    \item \textbf{Factual Token Variance (FTV):} Jaccard distance between factual tokens (numbers, proper nouns) across response variants.
+    \item \textbf{Semantic Answer Matching (SAM):} Sentence-BERT based semantic clustering of extracted answers for improved majority voting.
+\end{enumerate}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Ablation study results (sorted by F1, 500 trials each).}
+    \label{tab:ablation}
+    \begin{tabular}{lccc}
+        \toprule
+        Configuration & Precision & Recall & F1 \\
+        \midrule
+        SAM & 0.5791 & 1.000 & \textbf{0.7335} \\
+        Baseline & 0.5777 & 1.000 & 0.7324 \\
+        FTV & 0.5777 & 1.000 & 0.7324 \\
+        FTV+SAM & 0.5777 & 1.000 & 0.7324 \\
+        Neg & \textbf{0.6008} & 0.915 & 0.7254 \\
+        Neg+FTV & 0.5994 & 0.907 & 0.7218 \\
+        Neg+SAM & 0.6058 & 0.892 & 0.7215 \\
+        Neg+FTV+SAM & 0.6042 & 0.854 & 0.7076 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Ablation Analysis}
+
+The ablation study reveals several important insights:
+
+\begin{enumerate}
+    \item \textbf{Negation Contradiction is the only signal that improves precision.} Adding the Neg signal raises precision from 0.578 to 0.601--0.606 across all configurations. This is because negation probing tests logical coherence rather than mere consistency---a model that agrees with both a claim and its negation is exhibiting a qualitatively different type of failure.
+
+    \item \textbf{Factual Token Variance (FTV) provides no measurable benefit.} This is likely because TruthfulQA questions are predominantly textual/conceptual rather than numerical, limiting the applicability of number and proper noun comparison.
+
+    \item \textbf{Semantic Answer Matching (SAM) provides marginal improvement.} The improvement from string-based to semantic answer matching is minimal (F1: 0.7324 $\rightarrow$ 0.7335), suggesting that regex-based answer extraction already captures the majority of answer-level variation.
+
+    \item \textbf{Combining all three signals degrades performance.} The Neg+FTV+SAM configuration yields the lowest F1 (0.708), indicating that adding non-discriminative signals introduces noise that hampers optimization.
+\end{enumerate}
+
+\section{Threshold Analysis}
+
+Table~\ref{tab:threshold_sweep} presents the precision-recall trade-off at different decision thresholds using the optimized weights.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Performance at different thresholds (optimized weights).}
+    \label{tab:threshold_sweep}
+    \begin{tabular}{ccccccc}
+        \toprule
+        Threshold & Precision & Recall & F1 & TP & FP & FN \\
+        \midrule
+        0.250 & 0.579 & 1.000 & 0.734 & 472 & 343 & 0 \\
+        0.300 & 0.578 & 0.985 & 0.728 & 465 & 340 & 7 \\
+        0.325 & 0.566 & 0.888 & 0.691 & 419 & 321 & 53 \\
+        0.350 & 0.563 & 0.756 & 0.646 & 357 & 277 & 115 \\
+        0.400 & 0.583 & 0.545 & 0.563 & 257 & 184 & 215 \\
+        0.450 & 0.626 & 0.362 & 0.459 & 171 & 102 & 301 \\
+        0.500 & 0.559 & 0.150 & 0.237 & 71 & 56 & 401 \\
+        0.575 & 0.750 & 0.013 & 0.025 & 6 & 2 & 466 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The threshold sweep reveals that precision does not monotonically increase with threshold. At $\tau = 0.575$, precision reaches 0.750 but recall drops to 1.3\%, rendering the system impractical. The optimal operating point depends on the intended application:
+
+\begin{itemize}
+    \item \textbf{High-recall screening} ($\tau \leq 0.30$): Catches $\geq$98.5\% of hallucinations with $\sim$58\% precision. Suitable for automated pre-filtering before human review.
+    \item \textbf{Balanced operation} ($\tau \approx 0.40$): Precision $\sim$58\% with recall $\sim$55\%. Moderate performance in both dimensions.
+    \item \textbf{High-precision flagging} ($\tau \geq 0.50$): Precision increases but recall drops sharply. Only suitable for very high-confidence detections.
+\end{itemize}
+
+\section{Signal Importance Analysis}
+
+\subsection{Why Minority Penalty Dominates}
+
+The dominance of the Minority Penalty signal (39.19\% weight) can be understood through the nature of hallucination manifestation. When an LLM hallucinates on a question, the generated variants (paraphrases, negations, etc.) often elicit different specific answers because the model lacks a stable factual foundation. The majority voting mechanism directly captures this answer-level disagreement without requiring sophisticated NLI analysis.
+
+In contrast, NLI-based consistency (21.20\%) analyzes the semantic relationship between full response texts, which can be confounded by stylistic variation. The higher weight of a simpler signal suggests that answer extraction followed by majority voting provides a more reliable indicator than full-text NLI comparison.
+
+\subsection{The Consistency-Correctness Gap}
+
+A fundamental insight from our experiments is that \textbf{all five signals measure variations of consistency, but none measure correctness}. Specifically:
+
+\begin{itemize}
+    \item Self-Verification: Does the model agree with its own rephrased answer?
+    \item Inconsistency: Do variant responses contradict each other?
+    \item Entropy: How uncertain is the model during generation?
+    \item NCD: How structurally similar are the responses?
+    \item Minority Penalty: Do the extracted answers agree?
+\end{itemize}
+
+Without access to ground truth or external knowledge sources, the system cannot detect ``confident hallucinations''---cases where the model consistently and confidently produces the same incorrect answer across all variants. This explains the precision ceiling of approximately 60\%: roughly 40\% of non-hallucinated questions are falsely flagged because their risk scores overlap with those of genuinely hallucinated questions.
+
+\section{Discussion}
+
+\subsection{LOGIC-HALT as a Screening Tool}
+
+Given the precision-recall characteristics, LOGIC-HALT is best suited as a \textbf{high-recall screening tool} rather than a standalone decision system. At the default operating point ($\tau = 0.285$):
+
+\begin{itemize}
+    \item 91.5\% of actual hallucinations are detected (high recall)
+    \item 60.2\% of flagged responses are genuinely hallucinated (moderate precision)
+    \item Combined with human review of flagged responses, the system provides an effective pre-filtering mechanism
+\end{itemize}
+
+\subsection{Comparison with Related Methods}
+
+While direct comparison is difficult due to different datasets and evaluation protocols, we note that:
+
+\begin{itemize}
+    \item SelfCheckGPT \cite{manakul2023selfcheckgpt} achieves F1 $\approx$ 0.70 on its evaluation set using sampling-based consistency alone
+    \item LOGIC-HALT achieves F1 = 0.727 (precision-balanced) by combining consistency with information-theoretic and answer-level signals
+    \item Unlike SelfCheckGPT, LOGIC-HALT explicitly addresses the GT leakage problem and reports only inference-time metrics
+\end{itemize}
+
+\section{Limitations}
+
+\begin{enumerate}
+    \item \textbf{Precision Ceiling:} Without external knowledge or ground truth, precision is bounded at approximately 60\%. The system cannot determine factual correctness from consistency alone.
+
+    \item \textbf{Consistent Hallucinations:} When the model confidently produces the same incorrect answer across all variants, all consistency-based signals will indicate low risk, resulting in a false negative.
+
+    \item \textbf{Single Target LLM:} Results were obtained using GPT-4o-mini. Performance may differ with other LLMs due to varying response characteristics and hallucination patterns.
+
+    \item \textbf{Signal Overlap:} Self-Verification and Inconsistency signals are conceptually similar (both measure NLI-based agreement between responses), limiting the diversity of the signal space.
+
+    \item \textbf{Answer Extraction Brittleness:} The regex-based answer extraction in Module F may fail on complex or multi-part answers, degrading the Minority Penalty signal.
+
+    \item \textbf{Computational Overhead:} Generating multiple variant responses and performing pairwise NLI analysis introduces latency proportional to $O(n^2)$ in the number of responses, which may limit real-time applicability.
+
+    \item \textbf{Negation-Recall Trade-off:} While Negation Contradiction is the only signal that improves precision, it simultaneously reduces recall (from 1.000 to 0.915), indicating a fundamental tension between the two metrics in this signal space.
+\end{enumerate}
+
+\section{Summary}
+
+This chapter presented the experimental evaluation of LOGIC-HALT on the TruthfulQA benchmark. The discovery and correction of the GT Contradiction dependency led to a redesigned 5-signal system that reports honest, inference-time metrics. Under precision-balanced optimization, the system achieves F1 = 0.727 with Precision = 0.602 and Recall = 0.917, making it effective as a high-recall screening tool. The ablation study confirmed the dominance of answer-level majority voting and identified Negation Contradiction as the only additional signal that improves precision. The fundamental limitation---that consistency-based signals cannot measure factual correctness---establishes a clear direction for future work incorporating external knowledge sources.

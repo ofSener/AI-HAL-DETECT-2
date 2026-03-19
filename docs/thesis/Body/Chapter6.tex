@@ -1,0 +1,145 @@
+\chapter{Conclusion}
+
+This chapter summarizes the contributions of this thesis, discusses the implications of the findings, and outlines directions for future research.
+
+\section{Summary of Contributions}
+
+This thesis presented LOGIC-HALT, a novel reference-free framework for detecting hallucinations in Large Language Model responses to logical reasoning problems. The main contributions are:
+
+\subsection{Theoretical Contributions}
+
+\begin{enumerate}
+    \item \textbf{Hybrid Detection Framework:} We demonstrated that combining metamorphic testing principles with information-theoretic measures provides a more robust approach to hallucination detection than any single method alone.
+
+    \item \textbf{Ground-Truth Independence:} The proposed methodology does not require known correct answers, making it applicable to open-ended reasoning tasks where ground truth may not be available or verifiable.
+
+    \item \textbf{Two-Phase Detection Pipeline:} We introduced an efficient detection strategy that first checks answer-level consistency before performing computationally expensive detailed analysis, significantly reducing false positives caused by explanation style variations.
+\end{enumerate}
+
+\subsection{Technical Contributions}
+
+\begin{enumerate}
+    \item \textbf{Complete Implementation:} We developed a fully functional system including:
+    \begin{itemize}
+        \item Variant generation module using LLM-based transformations
+        \item NLI-based consistency engine using DeBERTa
+        \item Information-theoretic complexity engine (entropy + NCD)
+        \item Weighted fusion layer with configurable parameters
+        \item Answer extraction and majority voting module
+        \item Web-based interface for real-time analysis
+    \end{itemize}
+
+    \item \textbf{Empirical Evaluation:} We constructed a diverse test dataset and conducted systematic evaluation, identifying key factors affecting detection performance.
+
+    \item \textbf{Parameter Optimization:} We provided calibrated parameters that balance precision and recall for practical deployment.
+\end{enumerate}
+
+\section{Key Findings}
+
+The experimental evaluation revealed several important insights:
+
+\begin{enumerate}
+    \item \textbf{Consistency Analysis Limitations:} Traditional NLI-based consistency checking is sensitive to explanation style variations, leading to false positives even when final answers are correct. This highlights the need for answer-level rather than full-text consistency analysis.
+
+    \item \textbf{Threshold Sensitivity:} The decision threshold significantly impacts the precision-recall trade-off. Lower thresholds increase recall but cause excessive false positives; higher thresholds improve precision at the cost of missing some hallucinations.
+
+    \item \textbf{Metric Complementarity:} No single metric (consistency, entropy, or NCD) is sufficient for reliable detection. The fusion of multiple signals provides better discrimination than individual metrics.
+
+    \item \textbf{Question Type Dependency:} Detection performance varies across question categories. Trick questions with false premises are well-detected, while simple factual questions with correct answers are prone to false positives.
+\end{enumerate}
+
+\section{Implications}
+
+\subsection{For LLM Evaluation}
+
+The LOGIC-HALT framework provides a practical tool for:
+\begin{itemize}
+    \item Automated testing of LLM reasoning capabilities
+    \item Quality assurance in LLM-powered applications
+    \item Benchmarking hallucination rates across different models
+\end{itemize}
+
+\subsection{For Trustworthy AI}
+
+Our findings emphasize that:
+\begin{itemize}
+    \item LLM outputs should not be trusted without verification, especially for reasoning tasks
+    \item Consistency across multiple queries provides a useful (but imperfect) reliability signal
+    \item Information-theoretic measures complement consistency analysis
+\end{itemize}
+
+\subsection{For Practitioners}
+
+For deploying hallucination detection in practice:
+\begin{itemize}
+    \item Use two-phase detection to balance efficiency and accuracy
+    \item Calibrate thresholds based on the cost of false positives vs. false negatives in the specific application
+    \item Consider domain-specific fine-tuning of parameters
+    \item Combine automated detection with human review for critical decisions
+\end{itemize}
+
+\section{Limitations}
+
+Several limitations should be acknowledged:
+
+\begin{enumerate}
+    \item \textbf{Scale of Evaluation:} The test dataset of 20 questions, while diverse, is limited in size. Larger-scale evaluation across thousands of questions would provide more reliable performance estimates.
+
+    \item \textbf{Model Generalization:} Results were obtained using GPT-4o-mini. Performance may differ with other LLMs (Claude, Llama, etc.) due to varying response characteristics.
+
+    \item \textbf{Consistent Hallucinations:} The system may fail to detect hallucinations where the model consistently produces the same incorrect answer across all variants (``confident confabulation'').
+
+    \item \textbf{Computational Cost:} Generating multiple responses and performing NLI analysis introduces latency and API costs, limiting real-time applicability for high-throughput scenarios.
+
+    \item \textbf{Domain Specificity:} The current implementation and evaluation focus on general reasoning tasks. Specialized domains (medical, legal, technical) may require domain-specific adaptations.
+\end{enumerate}
+
+\section{Future Work}
+
+Several directions for future research emerge from this work:
+
+\subsection{Short-Term Improvements}
+
+\begin{enumerate}
+    \item \textbf{Larger Dataset Evaluation:} Expand evaluation to established benchmarks like LogicBench, Folio, and PrOntoQA with hundreds of questions.
+
+    \item \textbf{Cross-Model Testing:} Evaluate performance across multiple LLMs (GPT-4, Claude, Llama, Mistral) to assess generalization.
+
+    \item \textbf{Response Length Normalization:} Implement logarithmic length normalization for entropy to handle short responses more reliably.
+
+    \item \textbf{Confidence Calibration:} Develop methods to calibrate confidence scores for more interpretable risk estimates.
+\end{enumerate}
+
+\subsection{Medium-Term Extensions}
+
+\begin{enumerate}
+    \item \textbf{Active Learning:} Use detected hallucinations as training signals to improve the target LLM through fine-tuning or RLHF.
+
+    \item \textbf{Multi-Modal Extension:} Extend the framework to detect hallucinations in multi-modal LLMs (text + image).
+
+    \item \textbf{Real-Time Integration:} Develop optimized implementations for integration into production LLM pipelines with minimal latency overhead.
+
+    \item \textbf{Explainability Enhancement:} Provide more detailed explanations of why a response is flagged, including specific contradictions and uncertainty sources.
+\end{enumerate}
+
+\subsection{Long-Term Research Directions}
+
+\begin{enumerate}
+    \item \textbf{Theoretical Foundations:} Develop formal theory connecting information-theoretic properties to hallucination probability.
+
+    \item \textbf{Self-Correction Integration:} Combine detection with automatic correction mechanisms for detected hallucinations.
+
+    \item \textbf{Benchmark Development:} Create comprehensive hallucination detection benchmarks with standardized evaluation protocols.
+
+    \item \textbf{Adversarial Robustness:} Study robustness against adversarial inputs designed to evade detection.
+\end{enumerate}
+
+\section{Concluding Remarks}
+
+Large Language Models represent a significant advancement in artificial intelligence, but their tendency to hallucinate poses challenges for reliable deployment. This thesis contributes to addressing this challenge by proposing LOGIC-HALT, a practical framework for detecting reasoning hallucinations without requiring ground-truth answers.
+
+While no detection method is perfect, the combination of metamorphic testing, consistency analysis, and information theory provides a more robust approach than existing single-method solutions. The two-phase detection pipeline balances efficiency with accuracy, making the system practical for real-world use.
+
+As LLMs become increasingly integrated into critical applications, the importance of hallucination detection will only grow. We hope this work contributes to the broader goal of developing trustworthy AI systems that users can rely on for accurate information and sound reasoning.
+
+The source code, dataset, and web interface developed in this project are available for further research and development, with the aim of fostering continued progress in LLM reliability assessment.

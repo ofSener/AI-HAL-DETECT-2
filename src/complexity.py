@@ -267,6 +267,24 @@ class ComplexityEngine:
 
         return matrix
 
+    def calculate_pairwise_ncd(self, responses: List[str]) -> float:
+        """
+        Calculate average pairwise NCD across all response pairs.
+        This is the correct NCD signal for fusion - not single-text compression ratio.
+
+        Args:
+            responses: List of response texts
+        Returns:
+            Average pairwise NCD (0 to ~1.0, higher = more dissimilar)
+        """
+        if len(responses) < 2:
+            return 0.0
+
+        matrix = self.calculate_ncd_matrix(responses)
+        # Extract upper triangle (unique pairs only, excluding diagonal)
+        upper_triangle = matrix[np.triu_indices_from(matrix, k=1)]
+        return float(np.mean(upper_triangle))
+
     def normalize_scores(self, analyses: List[ComplexityAnalysis]) -> List[ComplexityAnalysis]:
         """
         Normalize entropy and NCD scores to 0-1 range.

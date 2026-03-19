@@ -1,0 +1,643 @@
+\chapter{Methodology}
+
+This chapter presents the complete architecture of the LOGIC-HALT framework, describing each module's functionality, the mathematical formulations governing its operation, and the overall detection pipeline. LOGIC-HALT is a modular, reference-free hallucination detection system that operates entirely at inference time, requiring no access to ground-truth answers or external knowledge bases. The system integrates metamorphic testing, natural language inference, information-theoretic analysis, and answer-level validation into a unified five-signal fusion framework whose weights are optimized via Bayesian hyperparameter search.
+
+\section{System Overview}
+
+LOGIC-HALT is structured as a six-module pipeline, illustrated in Figure~\ref{fig:architecture}. The core insight underlying the framework is that a reliable LLM, when asked semantically equivalent variants of the same question, should produce consistent answers; hallucinated responses, by contrast, tend to exhibit instability under semantic perturbation. The system exploits this principle through five complementary detection signals that capture different facets of hallucination.
+
+\begin{enumerate}
+    \item \textbf{Module A -- The Morpher:} Generates semantically equivalent question variants using five transformation operators and a teacher LLM.
+    \item \textbf{Module B -- The Interrogator:} Queries the target LLM with the original question and all variants, collecting structured responses with log-probabilities, and performs self-verification.
+    \item \textbf{Module C -- The Consistency Engine:} Builds a pairwise contradiction matrix using bidirectional NLI and derives graph-based consistency metrics.
+    \item \textbf{Module D -- The Complexity Engine:} Computes token entropy from log-probabilities and pairwise Normalized Compression Distance (NCD) across responses.
+    \item \textbf{Module E -- The Fusion Layer:} Combines five signals via a weighted linear model with Bayesian-optimized weights.
+    \item \textbf{Module F -- The Answer Validator:} Extracts final answers via regex, performs majority voting, and applies a minority penalty to outlier responses.
+\end{enumerate}
+
+\begin{figure}[!htbp]
+    \centering
+    \fbox{\parbox{0.92\textwidth}{
+    \centering
+    \textbf{LOGIC-HALT System Architecture}\\[10pt]
+    \begin{tabular}{c}
+    Input Question $Q$ \\
+    $\downarrow$ \\
+    \fbox{\textbf{Module A: Morpher}} $\rightarrow$ Variants $\{Q_1, Q_2, \ldots, Q_k\}$ \\
+    $\downarrow$ \\
+    \fbox{\textbf{Module B: Interrogator}} $\rightarrow$ Responses $\{R_0, R_1, \ldots, R_k\}$ + LogProbs \\
+    \hspace{3cm} $\searrow$ Self-Verification $\rightarrow R_{\text{verify}}$ \\
+    $\downarrow$ \\
+    \fbox{\textbf{Module F: Answer Validator}} $\rightarrow$ Minority Penalty \\
+    $\downarrow$ \\
+    \fbox{\textbf{Module C: Consistency}} \hspace{0.3cm} \fbox{\textbf{Module D: Complexity}} \\
+    NLI Contradiction Matrix \hspace{0.3cm} Entropy + Pairwise NCD \\
+    Self-Verification Score \\
+    $\downarrow$ \\
+    \fbox{\textbf{Module E: Fusion Layer}} (5-Signal Weighted Sum) \\
+    $\downarrow$ \\
+    \textbf{Hallucination Risk Score} $\xrightarrow{\tau}$ Binary Decision
+    \end{tabular}
+    }}
+    \caption{High-level architecture of the LOGIC-HALT system. The pipeline flows from variant generation through response collection, multi-signal analysis, and fusion to a final hallucination decision.}
+    \label{fig:architecture}
+\end{figure}
+
+\subsection{Design Evolution: From Ground-Truth Dependence to Inference-Time Detection}
+
+An important aspect of the LOGIC-HALT design process warrants explicit discussion. The system was originally conceived with six detection signals, including a \emph{ground-truth contradiction} signal that compared each LLM response against a known correct answer using NLI. During initial development and optimization, this ground-truth (GT) signal was the strongest individual predictor of hallucination, and the system achieved an F1 score of 0.7730 on TruthfulQA when this signal was included.
+
+However, this design contained a fundamental flaw: at inference time, the ground-truth answer is precisely what is unknown. A hallucination detector that requires the correct answer to function is, by definition, unusable in production. Upon recognizing this circularity, we undertook a complete redesign of the fusion layer, removing the GT contradiction signal and replacing it with five signals that are computable solely from the LLM's own outputs. This redesign required re-optimization of all weights using Bayesian search (500 Optuna TPE trials over 817 TruthfulQA questions), yielding a revised F1 score of 0.7346. While modestly lower than the GT-inclusive configuration, this system is \emph{honest} and \emph{deployable}: every signal it uses is available at inference time without any oracle knowledge.
+
+Throughout this chapter, all formulations describe the final, inference-time-only five-signal system unless explicitly stated otherwise.
+
+
+% ====================================================================
+\section{Module A: The Morpher (Variant Generation)}
+% ====================================================================
+
+The Morpher generates semantically equivalent variants of the input question using a teacher LLM guided by meta-prompts. The goal is to probe the target LLM from multiple angles: if the model truly ``understands'' the question, its answers should remain stable across logically equivalent reformulations. The Morpher is grounded in the principles of metamorphic testing \cite{chen2018metamorphic}, where a system's correctness is assessed not by checking individual outputs against expected values, but by verifying that relationships between outputs of related inputs are preserved.
+
+\subsection{Transformation Operators}
+
+We define five transformation operators $\{T_1, T_2, T_3, T_4, T_5\}$ that preserve semantic equivalence while altering surface-level characteristics of the question:
+
+\begin{enumerate}
+    \item \textbf{Paraphrase ($T_1$):} Restructures the sentence using different words and syntactic constructions while maintaining the identical logical meaning.
+    \begin{itemize}
+        \item Original: ``All men are mortal.''
+        \item Transformed: ``Every human being will eventually die.''
+    \end{itemize}
+
+    \item \textbf{Negation / Contrapositive ($T_2$):} Applies logically equivalent negation transformations such as double negation or the contrapositive.
+    \begin{equation}
+        P \rightarrow Q \;\equiv\; \neg Q \rightarrow \neg P
+    \end{equation}
+    \begin{itemize}
+        \item Original: ``If it rains, the ground gets wet.''
+        \item Transformed: ``If the ground is not wet, it did not rain.''
+    \end{itemize}
+
+    \item \textbf{Variable Substitution ($T_3$):} Replaces entity names (people, objects, locations) with abstract variables or different names while preserving the logical structure.
+    \begin{itemize}
+        \item Original: ``Socrates is a man. All men are mortal.''
+        \item Transformed: ``Entity X belongs to category Y. All members of Y are Z.''
+    \end{itemize}
+
+    \item \textbf{Premise Reordering ($T_4$):} Changes the presentation order of assumptions and premises without altering the logical dependencies among them.
+    \begin{itemize}
+        \item Original: ``All men are mortal. Socrates is a man. Is Socrates mortal?''
+        \item Transformed: ``Socrates is a man. All men are mortal. Is Socrates mortal?''
+    \end{itemize}
+
+    \item \textbf{Redundant Context ($T_5$):} Adds irrelevant background information that should not affect the answer if the model correctly identifies the relevant premises.
+    \begin{itemize}
+        \item Original: ``What is $2 + 2$?''
+        \item Transformed: ``On a sunny Tuesday afternoon in Istanbul, what is $2 + 2$?''
+    \end{itemize}
+\end{enumerate}
+
+\noindent
+Each transformation type probes a different aspect of the model's robustness:
+
+\begin{itemize}
+    \item $T_1$ (Paraphrase) tests whether the model is sensitive to surface-level word choice.
+    \item $T_2$ (Negation) tests logical equivalence understanding.
+    \item $T_3$ (Variable Substitution) tests whether the model's reasoning is bound to specific entities or is genuinely structural.
+    \item $T_4$ (Premise Reordering) tests sensitivity to presentation order.
+    \item $T_5$ (Redundant Context) tests susceptibility to irrelevant distractors.
+\end{itemize}
+
+\subsection{Teacher LLM for Variant Generation}
+
+Variant generation is performed by a \emph{teacher LLM} (GPT-4o-mini) using structured meta-prompts. For each transformation type $T_j$, a dedicated prompt template instructs the teacher model to produce a variant of the input question while adhering to the rules of that transformation. The teacher LLM is called with temperature 0.7 and a maximum output length of 500 tokens. Its output is expected in JSON format:
+
+\begin{verbatim}
+{"variant": "<transformed question>", "type": "<transformation_type>"}
+\end{verbatim}
+
+\noindent
+The system generates $k = 5$ variants (one per transformation type) by default. Combined with the original question, this yields $k + 1 = 6$ question instances to be queried.
+
+\subsection{Semantic Filtering via Sentence-BERT}
+
+Not all generated variants successfully preserve semantic equivalence; some may drift too far from the original meaning due to imperfect LLM generation. To filter out such cases, we employ Sentence-BERT \cite{reimers2019sentence} using the \texttt{all-MiniLM-L6-v2} model, which produces 384-dimensional sentence embeddings.
+
+For each candidate variant $Q_i$, we compute cosine similarity with the original question $Q$:
+
+\begin{equation}
+    \text{sim}(Q, Q_i) = \frac{\mathbf{e}_Q \cdot \mathbf{e}_{Q_i}}{\|\mathbf{e}_Q\| \cdot \|\mathbf{e}_{Q_i}\|}
+    \label{eq:cosine_sim}
+\end{equation}
+
+\noindent
+where $\mathbf{e}_Q, \mathbf{e}_{Q_i} \in \mathbb{R}^{384}$ are the respective sentence embeddings. Variants whose similarity falls below the threshold $\tau_{\text{sim}} = 0.75$ are discarded and excluded from subsequent pipeline stages:
+
+\begin{equation}
+    Q_i \text{ is valid} \iff \text{sim}(Q, Q_i) \geq \tau_{\text{sim}} = 0.75
+\end{equation}
+
+\noindent
+This threshold was determined empirically to balance two competing objectives: retaining enough diversity to probe the model effectively while ensuring that the question semantics are genuinely preserved.
+
+\begin{definition}[Metamorphic Relation]
+Given the original question $Q$ and a transformation operator $T_j$, the generated variant $Q_i = T_j(Q)$ satisfies the metamorphic relation if and only if the correct answer to $Q_i$ is identical to the correct answer to $Q$. Formally:
+\begin{equation}
+    \forall T_j \in \{T_1, \ldots, T_5\}, \quad \text{Answer}(Q) = \text{Answer}(T_j(Q))
+\end{equation}
+A reliable LLM should therefore produce the same answer for both $Q$ and $T_j(Q)$; deviations constitute evidence of potential hallucination.
+\end{definition}
+
+
+% ====================================================================
+\section{Module B: The Interrogator (Response Collection)}
+% ====================================================================
+
+The Interrogator queries the target LLM with the original question and all valid variants, collecting structured responses that separate the answer from its reasoning, along with token-level log-probabilities required by the Complexity Engine.
+
+\subsection{Target LLM and Parameters}
+
+The target LLM in our experimental setup is GPT-4o-mini, queried via the OpenAI API with the following fixed parameters:
+
+\begin{itemize}
+    \item \textbf{Temperature:} 0.3 (low, to encourage more deterministic outputs while allowing some variation)
+    \item \textbf{Maximum tokens:} 400
+    \item \textbf{Log-probabilities:} Enabled, with top-5 logprobs returned per token
+    \item \textbf{Samples per question:} 1 response per question instance
+\end{itemize}
+
+\noindent
+The choice of a low temperature (0.3) is deliberate. A high temperature would introduce artificial variation that obscures the signal we seek: variation arising from the model's genuine uncertainty or logical inconsistency. By constraining the sampling, we ensure that observed inconsistencies across variants are more likely to reflect genuine comprehension failures rather than random sampling noise.
+
+\subsection{Hybrid Response Format: ANSWER + REASONING}
+
+A critical design decision in LOGIC-HALT is the adoption of a \emph{hybrid response format} that explicitly separates the model's answer from its reasoning. The prompt instructs the target LLM to respond in the following structured format:
+
+\begin{verbatim}
+ANSWER: [Direct answer in 1-2 sentences]
+REASONING: [Brief explanation in 2-3 sentences]
+\end{verbatim}
+
+\noindent
+This separation serves a specific purpose in the downstream consistency analysis. When comparing responses to semantically equivalent questions using NLI, we compare \emph{only the ANSWER portions}, not the full responses. This prevents false positives caused by explanation style variance: two responses may express the same answer using entirely different explanatory approaches, which a full-text NLI comparison might incorrectly classify as contradictory. Entropy and NCD computation, however, use the full response text.
+
+\subsection{Response Data Structure}
+
+Each response $R_i$ from the target LLM is stored with its associated metadata:
+
+\begin{equation}
+    R_i = \left\{ \text{text}_i, \; \text{logprobs}_i, \; \text{answer}_i, \; \text{reasoning}_i, \; \text{variant\_type}_i \right\}
+\end{equation}
+
+\noindent
+where $\text{text}_i$ is the full response text, $\text{logprobs}_i = \{\log p(w_t \mid w_{<t})\}_{t=1}^{T_i}$ is the sequence of token log-probabilities, $\text{answer}_i$ and $\text{reasoning}_i$ are the parsed portions, and $\text{variant\_type}_i \in \{\text{original}, T_1, T_2, T_3, T_4, T_5\}$ indicates which transformation produced the input question.
+
+\subsection{Self-Verification}
+\label{sec:self_verify}
+
+In addition to collecting responses to all variants, the Interrogator performs a \emph{self-verification} step. After obtaining the original response $R_0$ to the original question $Q$, the system asks the same model (or optionally a stronger model) to fact-check its own answer:
+
+\begin{verbatim}
+Question: {Q}
+Someone gave this answer: {R_0.answer}
+Carefully fact-check this answer. Is it factually correct
+or does it contain errors?
+ANSWER: State CORRECT or INCORRECT
+REASONING: Explain why in 1-2 sentences
+\end{verbatim}
+
+\noindent
+The self-verification query is issued at temperature 0.0 (fully deterministic) to obtain the model's most confident assessment. The resulting verification response $R_{\text{verify}}$ is then compared against the original answer using NLI (described in Section~\ref{sec:self_verify_score}) to produce a self-verification contradiction score.
+
+
+% ====================================================================
+\section{Module C: The Consistency Engine (NLI-Based Analysis)}
+% ====================================================================
+
+The Consistency Engine evaluates semantic consistency across the collected responses using a pre-trained Natural Language Inference model. It constructs a contradiction graph and derives graph-theoretic metrics that quantify the degree of agreement or disagreement among the model's answers.
+
+\subsection{NLI Model}
+
+We employ \texttt{cross-encoder/nli-deberta-v3-large} \cite{he2021debertav3}, a 435-million-parameter DeBERTa-v3 model fine-tuned on the Multi-Genre NLI (MultiNLI) corpus for three-class classification. Given a premise--hypothesis text pair, the model outputs a probability distribution over three labels:
+
+\begin{equation}
+    \text{NLI}(R_i, R_j) = \{P_{\text{ent}}, \; P_{\text{neu}}, \; P_{\text{con}}\}
+\end{equation}
+
+\noindent
+where $P_{\text{ent}}$, $P_{\text{neu}}$, and $P_{\text{con}}$ denote the probabilities of entailment, neutral, and contradiction, respectively. The cross-encoder architecture processes the two texts jointly (separated by a \texttt{[SEP]} token), enabling rich cross-attention between them.
+
+\subsection{Pairwise Contradiction Matrix Construction}
+
+For each pair of responses $(R_i, R_j)$, we first extract the ANSWER portions using the \texttt{extract\_answer} function:
+
+\begin{equation}
+    A_i = \text{ExtractAnswer}(R_i), \quad A_j = \text{ExtractAnswer}(R_j)
+\end{equation}
+
+\noindent
+NLI is inherently asymmetric: the relationship $\text{NLI}(A_i, A_j)$ may differ from $\text{NLI}(A_j, A_i)$. To account for this, we evaluate \emph{both directions} and construct the contradiction matrix $\mathbf{M} \in \mathbb{R}^{n \times n}$ as follows. For each pair $(i, j)$ with $i < j$:
+
+\begin{equation}
+    (\ell_{ij}, c_{ij}) = \text{NLI}(A_i, A_j), \quad (\ell_{ji}, c_{ji}) = \text{NLI}(A_j, A_i)
+\end{equation}
+
+\noindent
+where $\ell$ denotes the predicted label and $c$ the associated confidence. The contradiction score is then computed based on the following rules:
+
+\begin{equation}
+    \mathbf{M}[i][j] = \begin{cases}
+        \max\!\big(c_{ij} \cdot \mathbb{1}[\ell_{ij} = \text{con}], \; c_{ji} \cdot \mathbb{1}[\ell_{ji} = \text{con}]\big)
+        & \text{if } \ell_{ij} = \text{con} \lor \ell_{ji} = \text{con} \\[6pt]
+        \displaystyle\frac{c_{ij} + c_{ji}}{2} \times 0.5
+        & \text{if } \ell_{ij} = \text{neu} \land \ell_{ji} = \text{neu} \\[6pt]
+        c_{\text{neu}} \times 0.3
+        & \text{if exactly one is neutral} \\[4pt]
+        0 & \text{if both entailment}
+    \end{cases}
+    \label{eq:contradiction_score}
+\end{equation}
+
+\noindent
+The matrix is symmetric: $\mathbf{M}[j][i] = \mathbf{M}[i][j]$. The diagonal entries are zero by convention.
+
+\subsection{Graph-Based Consistency Metrics}
+
+From the contradiction matrix, we construct an undirected weighted graph $G = (V, E)$ where each response is a node and an edge is added between responses $i$ and $j$ if $\mathbf{M}[i][j] > \tau_{\text{edge}}$ (with $\tau_{\text{edge}} = 0.5551$ after optimization). Edge weights correspond to the contradiction scores. We then compute three graph-theoretic metrics:
+
+\begin{enumerate}
+    \item \textbf{Graph Density ($d$):} The ratio of actual contradiction edges to the maximum possible number of edges.
+    \begin{equation}
+        d = \frac{|E|}{\binom{n}{2}} = \frac{2|E|}{n(n-1)}
+    \end{equation}
+    A high density indicates widespread disagreement among responses.
+
+    \item \textbf{Average Clustering Coefficient ($\bar{c}$):} Measures the degree to which contradictions are locally clustered. Computed using the standard NetworkX implementation:
+    \begin{equation}
+        \bar{c} = \frac{1}{n} \sum_{v \in V} c_v
+    \end{equation}
+    where $c_v$ is the local clustering coefficient of node $v$. High clustering may indicate the presence of distinct ``answer subgroups'' that internally agree but mutually contradict.
+
+    \item \textbf{Fragmentation ($f$):} Measures how many disconnected components exist in the graph.
+    \begin{equation}
+        f = \frac{|\mathcal{C}| - 1}{n - 1}
+    \end{equation}
+    where $|\mathcal{C}|$ is the number of connected components. A fragmented graph indicates multiple incompatible answer clusters.
+\end{enumerate}
+
+\subsection{Consistency Score}
+
+The overall consistency score combines the three graph metrics into a single value:
+
+\begin{equation}
+    S_{\text{cons}} = 1 - \left( \alpha_g \cdot d + \beta_g \cdot \bar{m} + \gamma_g \cdot f \right)
+    \label{eq:consistency_score}
+\end{equation}
+
+\noindent
+where $\alpha_g = 0.4$, $\beta_g = 0.4$, $\gamma_g = 0.2$ are internal weights for density, average contradiction strength, and fragmentation, respectively. The average contradiction strength $\bar{m}$ is the mean of all off-diagonal entries:
+
+\begin{equation}
+    \bar{m} = \frac{\sum_{i \neq j} \mathbf{M}[i][j]}{n(n-1)}
+\end{equation}
+
+\noindent
+The consistency score $S_{\text{cons}} \in [0, 1]$, where values near 1 indicate high agreement and values near 0 indicate pervasive contradiction.
+
+\subsection{Self-Verification Score}
+\label{sec:self_verify_score}
+
+The self-verification score quantifies the degree of contradiction between the model's original answer $A_0$ and its self-verification response $A_{\text{verify}}$. It uses exactly the same bidirectional NLI scoring logic as the contradiction matrix (Equation~\ref{eq:contradiction_score}):
+
+\begin{equation}
+    S_{\text{sv}} = \text{ContradictionScore}(A_0, A_{\text{verify}})
+\end{equation}
+
+\noindent
+where $A_0 = \text{ExtractAnswer}(R_0)$ and $A_{\text{verify}} = \text{ExtractAnswer}(R_{\text{verify}})$. A high self-verification score indicates that the model, upon re-examination, contradicts its own initial answer---a strong hallucination signal.
+
+
+% ====================================================================
+\section{Module D: The Complexity Engine (Information-Theoretic Analysis)}
+% ====================================================================
+
+The Complexity Engine computes two information-theoretic metrics: token entropy (measuring the model's internal uncertainty) and pairwise Normalized Compression Distance (measuring the informational dissimilarity between responses).
+
+\subsection{Token Entropy}
+
+Using the token-level log-probabilities $\{\log p(w_t \mid w_{<t})\}_{t=1}^{T}$ returned by the target LLM, we compute the average per-token entropy of each response:
+
+\begin{equation}
+    H(R) = -\frac{1}{T} \sum_{t=1}^{T} \log p(w_t \mid w_{<t})
+    \label{eq:token_entropy}
+\end{equation}
+
+\noindent
+where $T$ is the number of tokens in the response and $p(w_t \mid w_{<t})$ is the conditional probability assigned by the model to token $w_t$ given all preceding tokens. This quantity, measured in nats (natural log) or bits (log base 2), captures the model's average uncertainty during generation: a response generated with consistently high confidence (low entropy) is more likely to reflect genuine knowledge, while high entropy may indicate guessing or uncertainty.
+
+\subsection{Entropy Normalization}
+
+To map the raw entropy value to the $[0, 1]$ range for fusion, we apply min-max normalization with an empirically calibrated upper bound:
+
+\begin{equation}
+    H_{\text{norm}} = \min\!\left(\frac{H(R)}{H_{\max}}, \; 1.0\right)
+    \label{eq:entropy_norm}
+\end{equation}
+
+\noindent
+where $H_{\max}$ is an upper-bound calibration parameter. Through Bayesian optimization, $H_{\max}$ was tuned to approximately 6.29 for GPT-4o-mini responses on TruthfulQA-style questions.
+
+\subsection{Pairwise Normalized Compression Distance (NCD)}
+
+Normalized Compression Distance (NCD) \cite{li2008introduction, cilibrasi2005clustering} is an approximation of the uncomputable Normalized Information Distance based on Kolmogorov complexity. For two texts $x$ and $y$, NCD is defined as:
+
+\begin{equation}
+    \text{NCD}(x, y) = \frac{C(xy) - \min\!\big(C(x), C(y)\big)}{\max\!\big(C(x), C(y)\big)}
+    \label{eq:ncd}
+\end{equation}
+
+\noindent
+where $C(\cdot)$ denotes the compressed size (in bytes) using the zlib compression algorithm, and $xy$ denotes the concatenation of texts $x$ and $y$. NCD values range from approximately 0 (identical or highly similar) to approximately 1 (maximally dissimilar).
+
+\textbf{Critically}, the NCD signal used in LOGIC-HALT is the \emph{average pairwise NCD} computed across all pairs of responses, \emph{not} the compression ratio of individual responses. Given $n$ responses, we compute:
+
+\begin{equation}
+    \overline{\text{NCD}} = \frac{2}{n(n-1)} \sum_{i=1}^{n} \sum_{j=i+1}^{n} \text{NCD}(R_i, R_j)
+    \label{eq:avg_ncd}
+\end{equation}
+
+\noindent
+A high average pairwise NCD indicates that the responses are informationally dissimilar to one another, suggesting that the model is producing divergent content for semantically equivalent questions---a hallucination signal.
+
+\subsection{NCD Normalization}
+
+The average pairwise NCD is normalized to $[0, 1]$ using calibrated bounds:
+
+\begin{equation}
+    \text{NCD}_{\text{norm}} = \min\!\left(\frac{\overline{\text{NCD}}}{\text{NCD}_{\max}}, \; 1.0\right)
+\end{equation}
+
+\noindent
+where $\text{NCD}_{\max} \approx 0.7978$ is the optimized upper bound.
+
+
+% ====================================================================
+\section{Module F: The Answer Validator (Answer-Level Consistency)}
+% ====================================================================
+
+While the Consistency Engine operates at the semantic level (comparing the meaning of answer texts via NLI), the Answer Validator operates at the \emph{answer extraction level}, directly comparing the final answers given by the model. This module provides a complementary signal that addresses a limitation of NLI-based analysis: two responses may have similar semantic structure but contain different factual conclusions.
+
+\subsection{Answer Extraction}
+
+The Answer Validator uses regex-based pattern matching to extract the final answer from each response. The extraction pipeline searches for several patterns in order of specificity:
+
+\begin{enumerate}
+    \item \textbf{Numeric answers:} Patterns matching ``the answer is X'', ``result is X'', ``= X'', and final numbers.
+    \item \textbf{Boolean/categorical answers:} Patterns matching ``yes'', ``no'', ``true'', ``false'', and their Turkish equivalents (``evet'', ``hayir'').
+    \item \textbf{Named entities:} Key phrases extracted from the ANSWER portion.
+    \item \textbf{Fallback:} The last number appearing in the response text.
+\end{enumerate}
+
+\subsection{Majority Voting}
+
+Given the extracted answers $\{a_1, a_2, \ldots, a_n\}$ from all $n$ responses, we perform majority voting:
+
+\begin{equation}
+    a^* = \arg\max_{a \in \mathcal{A}} \sum_{i=1}^{n} \mathbb{1}[a_i = a]
+\end{equation}
+
+\noindent
+where $\mathcal{A}$ is the set of unique extracted answers. The majority ratio is:
+
+\begin{equation}
+    r_{\text{maj}} = \frac{|\{i : a_i = a^*\}|}{n}
+\end{equation}
+
+\subsection{Minority Penalty}
+
+Responses whose extracted answer disagrees with the majority receive a \emph{minority penalty}. The aggregated minority penalty for the question is determined by the strength of the majority consensus:
+
+\begin{equation}
+    P_{\text{minority}} = \begin{cases}
+        0.00 & \text{if } r_{\text{maj}} \geq 0.80 \\
+        0.10 & \text{if } 0.60 \leq r_{\text{maj}} < 0.80 \\
+        0.30 & \text{if } r_{\text{maj}} < 0.60
+    \end{cases}
+    \label{eq:minority_penalty}
+\end{equation}
+
+\noindent
+The minority penalty proved to be the single most important detection signal in the final optimized system, receiving the highest fusion weight ($w_5 = 0.3919$). This result is intuitive: if a model gives different final answers to semantically equivalent questions, that is the most direct evidence of unreliable reasoning, regardless of how consistent or confident the explanations may appear.
+
+
+% ====================================================================
+\section{Module E: The Fusion Layer (Five-Signal Decision)}
+% ====================================================================
+
+The Fusion Layer aggregates all signals into a single hallucination risk score. We employ a linear weighted combination of five normalized signals, where the weights are optimized via Bayesian hyperparameter search.
+
+\subsection{Five-Signal Fusion Formula}
+
+The hallucination risk is computed as:
+
+\begin{equation}
+    \text{Risk} = w_1 \cdot S_{\text{sv}} + w_2 \cdot (1 - S_{\text{cons}}) + w_3 \cdot H_{\text{norm}} + w_4 \cdot \text{NCD}_{\text{norm}} + w_5 \cdot P_{\text{minority}}
+    \label{eq:fusion}
+\end{equation}
+
+\noindent
+where:
+\begin{itemize}
+    \item $S_{\text{sv}}$ is the self-verification contradiction score (Section~\ref{sec:self_verify_score})
+    \item $(1 - S_{\text{cons}})$ is the inconsistency score (inverted consistency, higher = more inconsistent)
+    \item $H_{\text{norm}}$ is the normalized token entropy (Equation~\ref{eq:entropy_norm})
+    \item $\text{NCD}_{\text{norm}}$ is the normalized pairwise NCD
+    \item $P_{\text{minority}}$ is the minority penalty from the Answer Validator (Equation~\ref{eq:minority_penalty})
+\end{itemize}
+
+\noindent
+All five input signals are in the range $[0, 1]$, where higher values indicate greater hallucination suspicion. The weights are constrained to sum to unity: $\sum_{i=1}^{5} w_i = 1.0$.
+
+\subsection{Bayesian Weight Optimization}
+
+The fusion weights were optimized using the Tree-structured Parzen Estimator (TPE) algorithm \cite{bergstra2011algorithms} implemented in the Optuna framework \cite{akiba2019optuna}. The optimization procedure was as follows:
+
+\begin{itemize}
+    \item \textbf{Dataset:} 817 questions from the TruthfulQA benchmark \cite{lin2022truthfulqa}
+    \item \textbf{Labels:} Determined via NLI entailment between the LLM's answer and the ground-truth answer, using a \emph{separate} NLI model (\texttt{microsoft/deberta-large-mnli}) to avoid data leakage with the consistency features
+    \item \textbf{Search space:} Continuous intervals for each weight, threshold, and normalization parameter
+    \item \textbf{Objective:} Maximize F1 score
+    \item \textbf{Trials:} 500 Optuna trials with 15 random startup trials
+    \item \textbf{Hardware:} NVIDIA RTX 5070 (12GB VRAM), with FP16 inference for the NLI model
+\end{itemize}
+
+The optimization procedure pre-computes all NLI pair scores, entropy values, pairwise NCD, self-verification scores, and minority penalties once on the GPU, then evaluates different weight combinations purely in CPU memory. This allows 500 trials to complete in approximately 30 minutes.
+
+\subsection{Optimized Parameters}
+
+Table~\ref{tab:optimized_weights} presents the final optimized weights and threshold.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Bayesian-optimized fusion weights and threshold (500 TPE trials, 817 TruthfulQA questions). All weights are normalized to sum to 1.0.}
+    \label{tab:optimized_weights}
+    \begin{tabular}{llcc}
+        \toprule
+        Signal & Symbol & Weight & Contribution \\
+        \midrule
+        Self-Verification   & $w_1$ & 0.0852 & 8.52\% \\
+        Inconsistency       & $w_2$ & 0.2120 & 21.20\% \\
+        Token Entropy        & $w_3$ & 0.1493 & 14.93\% \\
+        Pairwise NCD         & $w_4$ & 0.1616 & 16.16\% \\
+        Minority Penalty     & $w_5$ & \textbf{0.3919} & \textbf{39.19\%} \\
+        \midrule
+        \multicolumn{2}{l}{Decision Threshold $\tau$} & \multicolumn{2}{c}{0.2848} \\
+        \midrule
+        \multicolumn{2}{l}{Best F1 Score} & \multicolumn{2}{c}{0.7346} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Several observations about the optimized weights merit discussion:
+
+\begin{enumerate}
+    \item \textbf{Minority Penalty dominates (39.19\%):} The answer extraction and majority voting signal carries the highest weight. This indicates that at the answer level, inconsistency across semantically equivalent questions is the most reliable hallucination indicator. When a model gives different final answers to the same question rephrased in different ways, this is the strongest evidence of unreliable reasoning.
+
+    \item \textbf{Inconsistency is second (21.20\%):} The NLI-based semantic inconsistency signal provides substantial discriminative power. It captures cases where the model produces contradictory explanations even when the final answers might coincidentally agree.
+
+    \item \textbf{NCD and Entropy contribute moderately (16.16\% and 14.93\%):} The information-theoretic signals provide complementary evidence. High NCD indicates divergent response content; high entropy indicates internal uncertainty during generation.
+
+    \item \textbf{Self-Verification is smallest (8.52\%):} While useful, the self-verification signal is the weakest contributor. This is understandable: when asked to fact-check itself, a hallucinating model may simply re-affirm its incorrect answer with high confidence, limiting the discriminative power of this signal.
+
+    \item \textbf{Low threshold ($\tau = 0.2848$):} The relatively low threshold reflects the system's design bias toward high recall---it is calibrated to catch as many hallucinations as possible, even at the cost of some false positives.
+\end{enumerate}
+
+\subsection{Classification Decision}
+
+The final binary classification is:
+
+\begin{equation}
+    \text{Decision} = \begin{cases}
+        \textsc{Hallucination} & \text{if } \text{Risk} \geq \tau \\
+        \textsc{Safe} & \text{if } \text{Risk} < \tau
+    \end{cases}
+    \label{eq:decision}
+\end{equation}
+
+\noindent
+where $\tau = 0.2848$ is the optimized decision threshold.
+
+\subsection{Confidence Estimation}
+
+In addition to the binary decision, the system reports a confidence level based on the distance between the risk score and the threshold:
+
+\begin{equation}
+    \text{Confidence} = \begin{cases}
+        \text{High} & \text{if } |\text{Risk} - \tau| \geq 0.70 - \tau \\
+        \text{Medium} & \text{if } \tau - 0.35 \leq |\text{Risk} - \tau| < 0.70 - \tau \\
+        \text{Low} & \text{otherwise}
+    \end{cases}
+\end{equation}
+
+\noindent
+This allows downstream consumers of the detection result to modulate their response based on how certain the system is about its classification.
+
+
+% ====================================================================
+\section{Complete Algorithm}
+% ====================================================================
+
+The complete LOGIC-HALT detection procedure is presented in Figure~\ref{alg:logichalt}. The algorithm takes as input a question $Q$, a target LLM $\mathcal{M}$, and the set of optimized parameters, and outputs a hallucination risk score with a binary classification.
+
+\begin{figure}[!htbp]
+\centering
+\fbox{\parbox{0.93\textwidth}{
+\textbf{Algorithm: LOGIC-HALT Hallucination Detection}\\[6pt]
+\textbf{Input:} Question $Q$, Target LLM $\mathcal{M}$, Teacher LLM $\mathcal{T}$, Weights $\{w_1, \ldots, w_5\}$, Threshold $\tau$\\
+\textbf{Output:} Hallucination risk score $\in [0, 1]$ and binary classification\\[8pt]
+
+\textit{// Phase 1: Variant Generation (Module A)}\\
+1. \textbf{for each} $T_j \in \{T_1, T_2, T_3, T_4, T_5\}$ \textbf{do}\\
+2. \hspace{0.7cm} $Q_j \gets \mathcal{T}(T_j, Q)$ \hfill \textit{// Generate variant via teacher LLM}\\
+3. \hspace{0.7cm} $\text{sim}_j \gets \text{CosineSim}(\text{SBERT}(Q), \text{SBERT}(Q_j))$\\
+4. \hspace{0.7cm} \textbf{if} $\text{sim}_j < 0.75$ \textbf{then discard} $Q_j$\\[6pt]
+
+\textit{// Phase 2: Response Collection (Module B)}\\
+5. \textbf{for each} $Q_i \in \{Q, Q_1, \ldots, Q_k\}$ \textbf{do}\\
+6. \hspace{0.7cm} $R_i \gets \mathcal{M}(Q_i)$ with temperature = 0.3, logprobs = \texttt{true}\\[4pt]
+7. $R_{\text{verify}} \gets \mathcal{M}(\text{FactCheckPrompt}(Q, R_0.\text{answer}))$ with temperature = 0.0\\[6pt]
+
+\textit{// Phase 3: Self-Verification Score (Module C)}\\
+8. $S_{\text{sv}} \gets \text{NLI\_Contradiction}(R_0.\text{answer}, R_{\text{verify}}.\text{answer})$\\[6pt]
+
+\textit{// Phase 4: Consistency Analysis (Module C)}\\
+9. \textbf{for each} pair $(R_i, R_j)$ with $i < j$ \textbf{do}\\
+10. \hspace{0.5cm} $\mathbf{M}[i][j] \gets \text{BiNLI}(R_i.\text{answer}, R_j.\text{answer})$ \hfill \textit{// Bidirectional NLI}\\
+11. Build graph $G$ from $\mathbf{M}$ with edge threshold $\tau_{\text{edge}}$\\
+12. $S_{\text{cons}} \gets 1 - (\alpha_g \cdot \text{density}(G) + \beta_g \cdot \text{mean}(\mathbf{M}) + \gamma_g \cdot \text{frag}(G))$\\[6pt]
+
+\textit{// Phase 5: Complexity Analysis (Module D)}\\
+13. $H_{\text{norm}} \gets \text{NormalizeEntropy}\!\left(-\frac{1}{T}\sum_t \log p(w_t \mid w_{<t})\right)$\\
+14. $\text{NCD}_{\text{norm}} \gets \text{Normalize}\!\left(\frac{2}{n(n{-}1)} \sum_{i<j} \text{NCD}(R_i, R_j)\right)$\\[6pt]
+
+\textit{// Phase 6: Answer Validation (Module F)}\\
+15. $\{a_1, \ldots, a_n\} \gets \text{ExtractAnswers}(\{R_0, R_1, \ldots, R_k\})$\\
+16. $a^* \gets \text{MajorityVote}(\{a_1, \ldots, a_n\})$\\
+17. $P_{\text{minority}} \gets \text{MinorityPenalty}(r_{\text{maj}})$ \hfill \textit{// Based on majority ratio}\\[6pt]
+
+\textit{// Phase 7: Fusion (Module E)}\\
+18. $\text{Risk} \gets w_1 S_{\text{sv}} + w_2 (1 - S_{\text{cons}}) + w_3 H_{\text{norm}} + w_4 \text{NCD}_{\text{norm}} + w_5 P_{\text{minority}}$\\
+19. \textbf{if} $\text{Risk} \geq \tau$ \textbf{then return} $\{\text{Risk}, \textsc{Hallucination}\}$\\
+20. \textbf{else return} $\{\text{Risk}, \textsc{Safe}\}$
+}}
+\caption{The LOGIC-HALT hallucination detection algorithm. The pipeline proceeds through seven phases: variant generation, response collection, self-verification, consistency analysis, complexity analysis, answer validation, and five-signal fusion.}
+\label{alg:logichalt}
+\end{figure}
+
+
+% ====================================================================
+\section{Computational Complexity Analysis}
+% ====================================================================
+
+The computational cost of the LOGIC-HALT pipeline is dominated by two operations: (1) LLM API calls in Modules A and B, and (2) NLI inference in Module C.
+
+\begin{itemize}
+    \item \textbf{LLM API calls:} For each input question, the system makes $k$ calls to the teacher LLM (variant generation), $k + 1$ calls to the target LLM (response collection), and 1 call for self-verification, totaling $2k + 2$ API calls. With $k = 5$, this is 12 API calls per question.
+
+    \item \textbf{NLI inference:} The Consistency Engine evaluates $\binom{n}{2}$ pairs in \emph{both} directions, yielding $n(n-1)$ NLI inferences. With $n = 6$ responses, this is 30 NLI forward passes. Additionally, self-verification requires 2 NLI passes (bidirectional). On an NVIDIA RTX 5070 with FP16 inference and batch size 64, all 32 NLI inferences complete in under 1 second.
+
+    \item \textbf{Pairwise NCD:} The $\binom{n}{2} = 15$ pairwise NCD computations involve zlib compression of text pairs, completing in negligible time (sub-millisecond per pair).
+
+    \item \textbf{Answer extraction and majority voting:} Regex-based extraction and counting are $O(n)$ operations.
+\end{itemize}
+
+\noindent
+The overall per-question latency is dominated by the LLM API calls (typically 1--3 seconds each), with all local computation completing in approximately 1--2 seconds on GPU hardware.
+
+
+% ====================================================================
+\section{Summary}
+% ====================================================================
+
+This chapter presented the complete LOGIC-HALT methodology for inference-time hallucination detection. The key contributions of the framework are:
+
+\begin{enumerate}
+    \item \textbf{Metamorphic variant generation} using five transformation operators with semantic filtering via Sentence-BERT (all-MiniLM-L6-v2, $\tau_{\text{sim}} = 0.75$).
+
+    \item \textbf{Hybrid response format} separating ANSWER from REASONING, enabling NLI comparison on answer portions only to reduce false positives from explanation style variance.
+
+    \item \textbf{Bidirectional NLI consistency analysis} using cross-encoder/nli-deberta-v3-large (435M parameters), with graph-based metrics (density, clustering, fragmentation).
+
+    \item \textbf{Self-verification} as a complementary signal, using NLI to detect contradictions between the model's original answer and its own fact-check.
+
+    \item \textbf{Pairwise NCD} as the correct information-theoretic dissimilarity measure between responses (not single-text compression ratios).
+
+    \item \textbf{Answer-level majority voting} with minority penalty, which emerged as the strongest individual signal (39.19\% of fusion weight).
+
+    \item \textbf{Five-signal Bayesian-optimized fusion} that operates entirely at inference time without requiring ground-truth answers, achieving F1 = 0.7346 on TruthfulQA with 817 questions.
+
+    \item \textbf{Honest evaluation}: explicit acknowledgment that the GT-dependent design (F1 = 0.7730) was unusable at inference time, motivating the redesign to inference-time-only signals.
+\end{enumerate}
+
+\noindent
+The next chapter describes the experimental setup, implementation details, and the benchmarks used for evaluation.

@@ -1,0 +1,336 @@
+\chapter{Methodology}
+
+This chapter presents the detailed architecture of LOGIC-HALT, describing each module's functionality, mathematical formulations, and the overall detection pipeline.
+
+\section{System Overview}
+
+LOGIC-HALT is designed as a modular pipeline consisting of five main components, as illustrated in Figure \ref{fig:architecture}:
+
+\begin{enumerate}
+    \item \textbf{Module A - The Morpher:} Generates semantically equivalent question variants
+    \item \textbf{Module B - The Interrogator:} Collects responses from the target LLM
+    \item \textbf{Module C - Consistency Engine:} Analyzes response consistency using NLI
+    \item \textbf{Module D - Complexity Engine:} Computes information-theoretic metrics
+    \item \textbf{Module E - Fusion Layer:} Combines signals for final decision
+\end{enumerate}
+
+Additionally, we introduce a supplementary \textbf{Module F - Answer Validator} that performs answer-level consistency checking for improved precision.
+
+\begin{figure}[!htbp]
+    \centering
+    \fbox{\parbox{0.9\textwidth}{
+    \centering
+    \textbf{LOGIC-HALT Architecture}\\[12pt]
+    \begin{tabular}{c}
+    Input Question $Q$ \\
+    $\downarrow$ \\
+    \fbox{Module A: Morpher} $\rightarrow$ Variants $\{Q_1, ..., Q_k\}$ \\
+    $\downarrow$ \\
+    \fbox{Module B: Interrogator} $\rightarrow$ Responses $\{R_1, ..., R_k\}$ \\
+    $\downarrow$ \\
+    \fbox{Module C: Consistency} + \fbox{Module D: Complexity} \\
+    $\downarrow$ \\
+    \fbox{Module E: Fusion Layer} \\
+    $\downarrow$ \\
+    Hallucination Risk Score
+    \end{tabular}
+    }}
+    \caption{High-level architecture of the LOGIC-HALT system.}
+    \label{fig:architecture}
+\end{figure}
+
+\section{Module A: The Morpher (Variant Generation)}
+
+The Morpher module generates semantically equivalent variants of the input question using a teacher LLM guided by meta-prompts.
+
+\subsection{Transformation Operators}
+
+We define four transformation operators that preserve semantic equivalence:
+
+\begin{enumerate}
+    \item \textbf{Syntactic Paraphrasing ($T_1$):} Restructures the sentence while maintaining meaning.
+    \begin{itemize}
+        \item Original: ``All men are mortal''
+        \item Transformed: ``Every human being will eventually die''
+    \end{itemize}
+
+    \item \textbf{Logical Equivalence ($T_2$):} Applies logical transformations such as contrapositive.
+    \begin{equation}
+        P \rightarrow Q \equiv \neg Q \rightarrow \neg P
+    \end{equation}
+    \begin{itemize}
+        \item Original: ``If it rains, the ground gets wet''
+        \item Transformed: ``If the ground is not wet, it did not rain''
+    \end{itemize}
+
+    \item \textbf{Variable Substitution ($T_3$):} Replaces entity names while preserving logical structure.
+    \begin{itemize}
+        \item Original: ``Socrates is a man''
+        \item Transformed: ``Entity X belongs to category Y''
+    \end{itemize}
+
+    \item \textbf{Redundant Context ($T_4$):} Adds irrelevant information that should not affect the answer.
+    \begin{itemize}
+        \item Original: ``What is 2 + 2?''
+        \item Transformed: ``On a sunny Tuesday afternoon, what is 2 + 2?''
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Semantic Filtering}
+
+To ensure variants maintain semantic equivalence, we employ Sentence-BERT embeddings and compute cosine similarity:
+
+\begin{equation}
+    \text{sim}(Q, Q_i) = \frac{\mathbf{e}_Q \cdot \mathbf{e}_{Q_i}}{||\mathbf{e}_Q|| \cdot ||\mathbf{e}_{Q_i}||}
+\end{equation}
+
+where $\mathbf{e}_Q$ represents the sentence embedding. Variants with similarity below threshold $\tau_{sim} = 0.85$ are discarded.
+
+\section{Module B: The Interrogator (Response Collection)}
+
+The Interrogator queries the target LLM with the original question and all variants, collecting both text responses and token-level log-probabilities.
+
+\subsection{Response Generation}
+
+For each question $Q_i$, we generate multiple responses using controlled sampling:
+
+\begin{itemize}
+    \item \textbf{Temperature:} Set to 0.3 for more deterministic outputs
+    \item \textbf{Number of responses:} $n = 10$ per question variant
+    \item \textbf{Log-probabilities:} Extracted for entropy calculation
+\end{itemize}
+
+The prompt format is designed to elicit direct answers:
+
+\begin{verbatim}
+Answer the following question:
+Question: {question}
+
+Provide your answer first, then explain briefly.
+Format:
+Answer: [your answer]
+Explanation: [brief explanation]
+\end{verbatim}
+
+\subsection{Response Data Structure}
+
+Each response is stored with associated metadata:
+
+\begin{equation}
+    R_i = \{text_i, logprobs_i, temperature_i, variant\_type_i\}
+\end{equation}
+
+\section{Module C: Consistency Engine (NLI Analysis)}
+
+The Consistency Engine evaluates semantic consistency across responses using Natural Language Inference models.
+
+\subsection{Contradiction Matrix Construction}
+
+We use a pre-trained NLI model (DeBERTa-v3-large-mnli) to classify relationships between response pairs. For responses $R_i$ and $R_j$, the model outputs:
+
+\begin{equation}
+    NLI(R_i, R_j) = \{P_{ent}, P_{neu}, P_{con}\}
+\end{equation}
+
+where $P_{ent}$, $P_{neu}$, and $P_{con}$ are probabilities for entailment, neutral, and contradiction respectively.
+
+We construct a contradiction matrix $M$ where:
+
+\begin{equation}
+    M_{ij} = P_{con}(R_i, R_j)
+\end{equation}
+
+\subsection{Consistency Score Calculation}
+
+The overall consistency score measures agreement across all response pairs:
+
+\begin{equation}
+    S_{cons} = 1 - \frac{1}{n(n-1)} \sum_{i \neq j} M_{ij}
+\end{equation}
+
+A high consistency score ($S_{cons} \approx 1$) indicates responses are semantically aligned, while a low score suggests contradictions that may indicate hallucination.
+
+\subsection{Per-Response Consistency}
+
+We also compute per-response consistency to identify outlier responses:
+
+\begin{equation}
+    S_{cons}^{(i)} = 1 - \frac{1}{n-1} \sum_{j \neq i} M_{ij}
+\end{equation}
+
+Responses with significantly lower consistency than the average may be hallucinated.
+
+\section{Module D: Complexity Engine (Information Theory)}
+
+The Complexity Engine computes information-theoretic metrics that capture uncertainty and structural properties of responses.
+
+\subsection{Token Entropy}
+
+Using log-probabilities from the LLM, we compute average token entropy:
+
+\begin{equation}
+    H(R) = -\frac{1}{T} \sum_{t=1}^{T} \log p(w_t | w_{<t})
+\end{equation}
+
+where $T$ is the number of tokens and $p(w_t | w_{<t})$ is the probability of token $w_t$ given previous context.
+
+To normalize entropy to $[0, 1]$, we apply sigmoid transformation:
+
+\begin{equation}
+    H_{norm} = \frac{1}{1 + e^{-(H - \mu)/\sigma}}
+\end{equation}
+
+where $\mu = 0.25$ and $\sigma = 0.15$ are calibration parameters based on empirical observations with GPT-4o-mini.
+
+\subsection{Normalized Compression Distance}
+
+We compute the compression ratio as a simplified NCD metric:
+
+\begin{equation}
+    NCD(R) = \frac{C(R)}{|R|}
+\end{equation}
+
+where $C(R)$ is the compressed size using zlib compression and $|R|$ is the original text length in bytes.
+
+Hallucinated responses may exhibit:
+\begin{itemize}
+    \item Low NCD: Excessive repetition
+    \item High NCD: Lack of coherent structure
+\end{itemize}
+
+\section{Module E: Fusion Layer (Decision Making)}
+
+The Fusion Layer combines signals from consistency and complexity analysis to produce a final hallucination risk score.
+
+\subsection{Weighted Combination}
+
+The hallucination risk is computed as:
+
+\begin{equation}
+    Risk = \alpha \cdot (1 - S_{cons}) + \beta \cdot H_{norm} + \gamma \cdot NCD_{norm}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\alpha$ = weight for consistency (inversed, as low consistency indicates risk)
+    \item $\beta$ = weight for entropy
+    \item $\gamma$ = weight for NCD
+    \item $\alpha + \beta + \gamma = 1$
+\end{itemize}
+
+\subsection{Parameter Configuration}
+
+Based on experimental tuning, we use:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Fusion layer parameters.}
+    \label{tab:params}
+    \begin{tabular}{lcc}
+        \toprule
+        Parameter & Symbol & Value \\
+        \midrule
+        Consistency weight & $\alpha$ & 0.15 \\
+        Entropy weight & $\beta$ & 0.50 \\
+        NCD weight & $\gamma$ & 0.35 \\
+        Decision threshold & $\tau$ & 0.55 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Classification Decision}
+
+The final classification is:
+
+\begin{equation}
+    Classification = \begin{cases}
+        \text{SAFE} & \text{if } Risk < \tau \\
+        \text{HALLUCINATION} & \text{if } Risk \geq \tau
+    \end{cases}
+\end{equation}
+
+\section{Module F: Answer Validator (Two-Phase Detection)}
+
+To reduce false positives caused by explanation style variations, we introduce a two-phase detection approach.
+
+\subsection{Phase 1: Answer-Level Consistency}
+
+Before detailed analysis, we extract final answers from all responses and perform majority voting:
+
+\begin{enumerate}
+    \item \textbf{Answer Extraction:} Use regex patterns to identify final answers (numbers, keywords, yes/no).
+    \item \textbf{Majority Voting:} Count occurrences of each unique answer.
+    \item \textbf{Fast-Track Decision:} If $\geq 80\%$ of responses give the same answer, classify as SAFE with reduced risk.
+\end{enumerate}
+
+\subsection{Phase 2: Detailed Analysis}
+
+If answer consistency is below threshold, proceed with full analysis:
+
+\begin{itemize}
+    \item NLI-based consistency scoring
+    \item Entropy and NCD computation
+    \item Fusion layer decision
+\end{itemize}
+
+\subsection{Minority Penalty}
+
+Responses that disagree with the majority answer receive a penalty:
+
+\begin{equation}
+    Risk_{adjusted} = Risk_{base} + penalty_{minority}
+\end{equation}
+
+where $penalty_{minority} = 0.30$ for minority answers.
+
+\section{Complete Algorithm}
+
+The complete LOGIC-HALT detection procedure is presented below:
+
+\begin{figure}[!htbp]
+\centering
+\fbox{\parbox{0.9\textwidth}{
+\textbf{Algorithm: LOGIC-HALT Hallucination Detection}\\[6pt]
+\textbf{Input:} Question $Q$, Target LLM $M$, Parameters $\alpha, \beta, \gamma, \tau$\\
+\textbf{Output:} Hallucination risk score and classification\\[6pt]
+
+\textit{// Module A: Generate Variants}\\
+1. $\{Q_1, ..., Q_k\} \gets \text{Morpher}(Q)$\\[4pt]
+
+\textit{// Module B: Collect Responses}\\
+2. \textbf{for each} $Q_i$ \textbf{in} $\{Q, Q_1, ..., Q_k\}$ \textbf{do}\\
+3. \hspace{1cm} $R_i \gets M(Q_i)$ with logprobs\\[4pt]
+
+\textit{// Phase 1: Answer-Level Check}\\
+4. $answers \gets \text{ExtractAnswers}(\{R_1, ..., R_n\})$\\
+5. $majority\_ratio \gets \text{MajorityVote}(answers)$\\
+6. \textbf{if} $majority\_ratio \geq 0.80$ \textbf{then return} $\{risk: 0.30, class: \text{SAFE}\}$\\[4pt]
+
+\textit{// Phase 2: Detailed Analysis}\\
+7. $M_{con} \gets \text{BuildContradictionMatrix}(\{R_i\})$\\
+8. $S_{cons} \gets 1 - \text{mean}(M_{con})$\\
+9. $H_{norm} \gets \text{NormalizeEntropy}(\text{ComputeEntropy}(\{R_i\}))$\\
+10. $NCD_{norm} \gets \text{ComputeNCD}(\{R_i\})$\\[4pt]
+
+\textit{// Module E: Fusion}\\
+11. $Risk \gets \alpha(1-S_{cons}) + \beta \cdot H_{norm} + \gamma \cdot NCD_{norm}$\\
+12. \textbf{if} $Risk < \tau$ \textbf{then return} $\{risk: Risk, class: \text{SAFE}\}$\\
+13. \textbf{else return} $\{risk: Risk, class: \text{HALLUCINATION}\}$
+}}
+\caption{LOGIC-HALT hallucination detection algorithm.}
+\label{alg:logichalt}
+\end{figure}
+
+\section{Summary}
+
+This chapter presented the complete LOGIC-HALT methodology, including:
+
+\begin{itemize}
+    \item Variant generation through metamorphic transformations
+    \item NLI-based consistency analysis using contradiction graphs
+    \item Information-theoretic metrics (entropy and NCD)
+    \item Weighted fusion for final decision making
+    \item Two-phase detection for improved precision
+\end{itemize}
+
+The next chapter describes the experimental setup and implementation details.

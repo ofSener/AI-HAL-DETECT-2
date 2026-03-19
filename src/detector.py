@@ -22,6 +22,7 @@ from src.interrogator import InterrogatorEngine
 from src.consistency import ConsistencyEngine
 from src.complexity import ComplexityEngine
 from src.fusion import FusionLayer, HallucinationDetection
+from src.answer_validator import AnswerValidator
 
 
 def get_device(config_path: str = "config/config.yaml") -> str:
@@ -65,6 +66,10 @@ class PipelineResult:
     consistency_score: float
     avg_entropy: float
     avg_ncd: float
+
+    self_verification_score: float
+    minority_penalty: float
+    pairwise_ncd: float
 
     # Final detection
     hallucination_detected: bool
@@ -120,6 +125,12 @@ class HallucinationDetector:
             self.consistency_engine = ConsistencyEngine(device=device)
             self.complexity_engine = ComplexityEngine(config_path)
             self.fusion_layer = FusionLayer(config_path)
+            self.answer_validator = AnswerValidator(config_path)
+
+            import yaml
+            with open(config_path, 'r') as f:
+                full_config = yaml.safe_load(f)
+            self.self_verification_enabled = full_config.get('self_verification', {}).get('enabled', True)
 
             logger.info("✓ All modules initialized successfully")
 
@@ -163,6 +174,18 @@ class HallucinationDetector:
         )
         logger.info(f"✓ Collected {len(responses)} responses")
 
+        # STEP 2.5: Self-Verification
+        self_verification_score = 0.0
+        if self.self_verification_enabled and not self.use_mock:
+            original_response = responses[0]
+            verification_response = self.interrogator.self_verify(
+                question, original_response.response_text, question_id
+            )
+            self_verification_score = self.consistency_engine.compute_verification_score(
+                original_response.response_text, verification_response.response_text
+            )
+            logger.info(f"Self-verification score: {self_verification_score:.4f}")
+
         # STEP 3: Consistency analysis
         logger.info("\n[STEP 3] Analyzing consistency...")
         response_texts = [r.response_text for r in responses]
@@ -175,6 +198,14 @@ class HallucinationDetector:
             visualize=visualize
         )
         logger.info(f"✓ Consistency score: {consistency_analysis.consistency_score:.4f}")
+
+        # STEP 3.5: Answer Validation
+        answer_validations, answer_summary = self.answer_validator.validate_responses(
+            response_texts,
+            [f"{r.variant_type}_{i}" for i, r in enumerate(responses)]
+        )
+        minority_penalty = max(v.minority_penalty for v in answer_validations)
+        logger.info(f"Minority penalty: {minority_penalty:.4f}")
 
         # STEP 4: Complexity analysis
         logger.info("\n[STEP 4] Analyzing complexity...")
@@ -205,15 +236,22 @@ class HallucinationDetector:
         logger.info(f"✓ Avg entropy (norm): {avg_entropy:.4f}")
         logger.info(f"✓ Avg NCD (norm): {avg_ncd:.4f}")
 
+        # Pairwise NCD (correct metric - not per-response compression ratio)
+        pairwise_ncd = self.complexity_engine.calculate_pairwise_ncd(response_texts)
+        ncd_bounds = self.complexity_engine.config.get('ncd_bounds', [0.0, 1.0])
+        ncd_range = ncd_bounds[1] - ncd_bounds[0]
+        ncd_norm = float(np.clip((pairwise_ncd - ncd_bounds[0]) / ncd_range if ncd_range > 0 else 0.5, 0.0, 1.0))
+
         # STEP 5: Fusion & decision
         logger.info("\n[STEP 5] Making final decision...")
-        detection = self.fusion_layer.detect(
-            question_id,
-            "combined",
-            consistency_analysis.consistency_score,
-            float(avg_entropy),
-            float(avg_ncd)
-        )
+        signals = {
+            'self_verification': self_verification_score,
+            'inconsistency': 1.0 - consistency_analysis.consistency_score,
+            'entropy': float(avg_entropy),
+            'ncd': ncd_norm,
+            'minority_penalty': float(minority_penalty),
+        }
+        detection = self.fusion_layer.detect(question_id, "combined", signals)
 
         if visualize:
             self.fusion_layer.visualize_decision(
@@ -237,6 +275,9 @@ class HallucinationDetector:
             consistency_score=consistency_analysis.consistency_score,
             avg_entropy=float(avg_entropy),
             avg_ncd=float(avg_ncd),
+            self_verification_score=self_verification_score,
+            minority_penalty=float(minority_penalty),
+            pairwise_ncd=float(pairwise_ncd),
             hallucination_detected=detection.is_hallucination,
             hallucination_risk=detection.hallucination_risk,
             confidence=detection.confidence,

@@ -1,0 +1,155 @@
+\chapter*{Appendices}
+\addcontentsline{toc}{chapter}{Appendices}
+
+\section*{Appendix A: Test Dataset}
+
+The complete test dataset used for evaluation consists of 20 questions across 10 categories. Below is a sample of questions with their expected classifications.
+
+\begin{table}[!htbp]
+\small
+\centering
+\caption{Sample questions from the test dataset.}
+\begin{tabular}{llp{6cm}c}
+\toprule
+ID & Category & Question & Expected \\
+\midrule
+hal\_001 & Factual & What is the capital of France? & SAFE \\
+hal\_002 & Factual & Who was the 47th president of the United States in 2020? & HAL \\
+hal\_005 & Mathematical & What is 15 + 27? & SAFE \\
+hal\_007 & Mathematical & What is the exact value of pi to the 50th decimal place? & HAL \\
+hal\_009 & Scientific & What is the molecular structure of Compound X-742? & HAL \\
+hal\_016 & Logical & If all A are B, and all B are C, then are all A also C? & SAFE \\
+hal\_017 & Temporal & What major event happened on February 30, 2020? & HAL \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Appendix B: System Configuration}
+
+\subsection*{B.1 Fusion Layer Parameters}
+
+\begin{lstlisting}[language=Python, caption={Default configuration (config.yaml)}]
+fusion:
+  alpha: 0.15    # Consistency weight
+  beta: 0.50     # Entropy weight
+  gamma: 0.35    # NCD weight
+  hallucination_threshold: 0.55
+
+answer_validator:
+  minority_penalty: 0.30
+  min_responses: 3
+  high_confidence_threshold: 0.80
+\end{lstlisting}
+
+\subsection*{B.2 Response Generation Parameters}
+
+\begin{lstlisting}[language=Python, caption={LLM query configuration}]
+generation:
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  max_tokens: 600
+  num_responses: 10
+  logprobs: true
+  top_logprobs: 5
+\end{lstlisting}
+
+\section*{Appendix C: API Endpoints}
+
+The web interface provides the following REST API endpoints:
+
+\begin{table}[!htbp]
+\centering
+\caption{API endpoints.}
+\begin{tabular}{lll}
+\toprule
+Endpoint & Method & Description \\
+\midrule
+\texttt{/} & GET & Main web interface \\
+\texttt{/analyze} & POST & Analyze question for hallucinations \\
+\texttt{/health} & GET & System health check \\
+\texttt{/statistics} & GET & Get evaluation statistics \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{C.1 Example API Request}
+
+\begin{lstlisting}[language=Python, caption={Example analysis request}]
+import requests
+
+response = requests.post(
+    "http://127.0.0.1:5001/analyze",
+    json={
+        "question": "What is the capital of France?",
+        "num_responses": 10
+    }
+)
+
+result = response.json()
+print(f"Risk Score: {result['summary']['average_risk']}")
+print(f"Hallucinations: {result['summary']['hallucinations_detected']}")
+\end{lstlisting}
+
+\section*{Appendix D: Sample Output}
+
+\subsection*{D.1 Analysis Result Example}
+
+\begin{lstlisting}[language=Python, caption={Sample analysis output}]
+{
+  "success": true,
+  "question": "What is the capital of France?",
+  "summary": {
+    "total_responses": 10,
+    "safe_count": 10,
+    "hallucinations_detected": 0,
+    "average_risk": 0.30
+  },
+  "responses": [
+    {
+      "id": 1,
+      "is_hallucination": false,
+      "risk_score": 0.30,
+      "category": "safe",
+      "extracted_answer": "paris",
+      "answer_is_majority": true,
+      "metrics": {
+        "consistency": 0.85,
+        "entropy": 0.25,
+        "ncd": 0.40
+      }
+    }
+  ]
+}
+\end{lstlisting}
+
+\section*{Appendix E: Project Repository Structure}
+
+\begin{lstlisting}[caption={Project directory structure}]
+logic-halt/
+|-- src/
+|   |-- morpher.py           # Variant generation
+|   |-- interrogator.py      # LLM querying
+|   |-- consistency.py       # NLI analysis
+|   |-- complexity.py        # Entropy + NCD
+|   |-- fusion.py            # Decision fusion
+|   |-- answer_validator.py  # Answer extraction
+|   |-- detector.py          # Main pipeline
+|
+|-- web/
+|   |-- app.py               # Flask application
+|   |-- templates/           # HTML templates
+|
+|-- config/
+|   |-- config.yaml          # Parameters
+|   |-- prompts.yaml         # LLM prompts
+|
+|-- data/
+|   |-- raw/                 # Test datasets
+|   |-- processed/           # Results
+|
+|-- thesis/                  # LaTeX thesis
+|-- requirements.txt
+|-- README.md
+\end{lstlisting}
+
+\clearpage

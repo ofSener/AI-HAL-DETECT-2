@@ -1,0 +1,70 @@
+\chapter{Introduction}
+
+\section{Background and Motivation}
+
+Large Language Models (LLMs) such as GPT-4, Claude, and Llama have revolutionized natural language processing by demonstrating remarkable capabilities in text generation, question answering, and reasoning tasks \cite{brown2020language}. These models, trained on vast amounts of text data, can generate human-like responses that are often indistinguishable from those written by humans. However, despite their impressive performance, LLMs suffer from a critical limitation known as ``hallucination'' -- the tendency to generate fluent, confident, but factually incorrect or logically inconsistent responses \cite{ji2023survey}.
+
+Hallucinations in LLMs pose significant challenges for their deployment in critical applications such as healthcare, legal systems, and autonomous decision-making. Unlike human experts who typically express uncertainty when unsure, LLMs often present hallucinated content with high confidence, making it difficult for users to distinguish reliable information from fabricated content \cite{manakul2023selfcheckgpt}.
+
+The problem becomes particularly acute in logical reasoning tasks. While factual hallucinations (e.g., incorrect dates or names) can potentially be verified against external knowledge bases like Wikipedia, reasoning hallucinations in logical problems cannot be easily fact-checked. A model might generate a perfectly grammatical and seemingly logical argument that nevertheless contains fundamental logical flaws. This type of hallucination requires internal consistency analysis rather than external verification.
+
+\section{Problem Statement}
+
+The core problem addressed in this thesis is the detection of hallucinations in LLM responses to logical reasoning problems without relying on ground-truth answers or external knowledge sources. Specifically, we aim to answer the following research question:
+
+\textit{Can we reliably detect hallucinations in LLM responses by analyzing the consistency and information-theoretic properties of multiple responses to semantically equivalent questions?}
+
+Traditional approaches to hallucination detection typically fall into two categories: (1) retrieval-based methods that verify claims against knowledge bases, and (2) self-consistency methods that analyze variance across multiple responses. However, both approaches have limitations:
+
+\begin{itemize}
+    \item \textbf{Retrieval-based methods} require external knowledge sources and cannot handle reasoning tasks where the ``truth'' depends on logical inference rather than factual lookup.
+    \item \textbf{Self-consistency methods} may fail when models produce ``consistent hallucinations'' -- repeatedly generating the same incorrect answer with high confidence.
+\end{itemize}
+
+Our approach addresses these limitations by combining metamorphic testing principles with information-theoretic analysis, creating a reference-free detection framework applicable to open-ended reasoning tasks.
+
+\section{Proposed Solution: LOGIC-HALT}
+
+This thesis presents LOGIC-HALT (LOGical Inconsistency and Compression-based HALlucination Testing), a hybrid framework for hallucination detection that combines three complementary approaches:
+
+\begin{enumerate}
+    \item \textbf{Metamorphic Testing:} We generate semantically equivalent variants of input questions using transformation operators (paraphrasing, negation, variable substitution). If an LLM truly understands the logical structure of a problem, it should provide consistent answers across all variants.
+
+    \item \textbf{Graph-Based Consistency Analysis:} We employ Natural Language Inference (NLI) models to analyze pairwise relationships between responses, constructing a contradiction graph where edges represent semantic conflicts between answers.
+
+    \item \textbf{Information-Theoretic Metrics:} We measure response uncertainty through token entropy (from log-probabilities) and structural complexity through Normalized Compression Distance (NCD), providing complementary signals for hallucination detection.
+\end{enumerate}
+
+These three signals are combined through a weighted fusion layer to produce a final hallucination risk score. The system implements a two-phase detection pipeline: a fast answer-level consistency check followed by detailed analysis when needed.
+
+\section{Contributions}
+
+The main contributions of this thesis are:
+
+\begin{enumerate}
+    \item \textbf{A Reference-Free Detection Framework:} We propose a novel methodology for detecting hallucinations without requiring ground-truth answers, making it applicable to open-ended reasoning tasks where correct answers may not be readily available.
+
+    \item \textbf{Integration of Metamorphic Testing with Information Theory:} We demonstrate how software testing principles can be combined with information-theoretic measures to evaluate LLM reliability, bridging concepts from software engineering, mathematics, and natural language processing.
+
+    \item \textbf{Two-Phase Detection Pipeline:} We introduce an efficient two-phase approach that first checks answer-level consistency before performing computationally expensive detailed analysis, reducing false positives caused by explanation style variations.
+
+    \item \textbf{Practical Implementation:} We provide a complete implementation with a web-based interface for real-time hallucination detection, including all modules for variant generation, response collection, consistency analysis, and risk scoring.
+
+    \item \textbf{Empirical Evaluation:} We evaluate the system on a diverse dataset spanning factual, mathematical, scientific, and logical categories, demonstrating its effectiveness in distinguishing reliable from hallucinated responses.
+\end{enumerate}
+
+\section{Thesis Organization}
+
+The remainder of this thesis is organized as follows:
+
+\begin{itemize}
+    \item \textbf{Chapter 2: Related Work} reviews existing approaches to hallucination detection in LLMs, metamorphic testing methodologies, and information-theoretic measures for text analysis.
+
+    \item \textbf{Chapter 3: Methodology} presents the detailed architecture of LOGIC-HALT, including the mathematical formulations for each module and the fusion mechanism.
+
+    \item \textbf{Chapter 4: Experimental Setup} describes the implementation details, dataset construction, evaluation metrics, and experimental configuration.
+
+    \item \textbf{Chapter 5: Results and Discussion} presents the experimental results, analyzes system performance, and discusses limitations and insights.
+
+    \item \textbf{Chapter 6: Conclusion} summarizes the findings, discusses implications, and outlines directions for future research.
+\end{itemize}

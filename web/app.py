@@ -301,17 +301,20 @@ def analyze_responses(responses: list, question_id: str = "web_query") -> list:
                 ncd_norm = complexity.compression_ratio if complexity.compression_ratio else 0.5
 
                 # Fusion decision
+                signals = {
+                    'self_verification': 0.0,
+                    'inconsistency': 1.0 - response_consistency,
+                    'entropy': entropy_norm,
+                    'ncd': ncd_norm,
+                    'minority_penalty': answer_penalty,
+                }
                 detection = fusion_layer.detect(
                     question_id,
                     f"response_{response['id']}",
-                    response_consistency,
-                    entropy_norm,
-                    ncd_norm
+                    signals
                 )
 
-                # Apply answer minority penalty
-                risk = detection.hallucination_risk + answer_penalty
-                risk = min(risk, 1.0)
+                risk = detection.hallucination_risk
 
                 # Classification
                 if risk < threshold:
@@ -571,13 +574,14 @@ def analyze_qa():
             entropy_norm = 0.5
 
         # Step 5: Fusion decision
-        detection = fusion_layer.detect(
-            "qa_check",
-            "user_answer",
-            user_consistency,
-            entropy_norm,
-            ncd_norm
-        )
+        signals = {
+            'self_verification': 0.0,
+            'inconsistency': 1.0 - user_consistency,
+            'entropy': entropy_norm,
+            'ncd': ncd_norm,
+            'minority_penalty': 0.0,
+        }
+        detection = fusion_layer.detect("qa_check", "user_answer", signals)
 
         risk = detection.hallucination_risk
         threshold = fusion_layer.threshold  # Use config threshold

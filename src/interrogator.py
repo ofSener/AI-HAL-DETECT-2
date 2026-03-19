@@ -130,6 +130,69 @@ class InterrogatorEngine:
         else:
             return self._query_huggingface(question, question_id, variant_type, model_name)
 
+    def self_verify(self, question: str, answer: str,
+                    question_id: str = "self_verify",
+                    model_name: Optional[str] = None) -> LLMResponse:
+        """
+        Ask a stronger model to verify the answer.
+        Uses temperature=0.0 for deterministic verification.
+        Defaults to gpt-4o for higher quality fact-checking.
+
+        Args:
+            question: The original question
+            answer: The model's original answer to verify
+            question_id: Question identifier
+            model_name: Model to use (default: gpt-4o for stronger verification)
+
+        Returns:
+            LLMResponse containing the verification response
+        """
+        if model_name is None:
+            # Use stronger model for verification (gpt-4o > gpt-4o-mini)
+            model_name = self.config.get('verification_model', 'gpt-4o')
+
+        # Build verification prompt - designed to elicit factual disagreement
+        verification_prompt = (
+            f"Question: {question}\n\n"
+            f"Someone gave this answer: {answer}\n\n"
+            f"Carefully fact-check this answer. Is it factually correct or does it contain errors?\n"
+            f"ANSWER: State CORRECT or INCORRECT\n"
+            f"REASONING: Explain why in 1-2 sentences"
+        )
+
+        # Override system prompt and temperature for verification
+        original_system_prompt = self.prompts['system_prompt']
+        original_user_template = self.prompts['user_template']
+        original_temperature = self.config['temperature']
+
+        self.prompts['system_prompt'] = (
+            "You are a rigorous fact-checker. Your job is to verify factual claims. "
+            "Be skeptical - check for common misconceptions, false premises, and incorrect facts. "
+            "If the answer contains ANY factual error, mark it as INCORRECT."
+        )
+        self.prompts['user_template'] = "{question}"
+        self.config['temperature'] = 0.0
+
+        try:
+            # Route to appropriate provider
+            if 'gpt' in model_name.lower():
+                return self._query_openai(
+                    verification_prompt, question_id, "self_verify", model_name
+                )
+            elif 'claude' in model_name.lower():
+                return self._query_anthropic(
+                    verification_prompt, question_id, "self_verify", model_name
+                )
+            else:
+                return self._query_huggingface(
+                    verification_prompt, question_id, "self_verify", model_name
+                )
+        finally:
+            # Restore original settings
+            self.prompts['system_prompt'] = original_system_prompt
+            self.prompts['user_template'] = original_user_template
+            self.config['temperature'] = original_temperature
+
     def _query_openai(self, question: str, question_id: str,
                      variant_type: str, model_name: str) -> LLMResponse:
         """Query OpenAI models (GPT-3.5, GPT-4)"""

@@ -104,6 +104,35 @@ class MockInterrogatorEngine(InterrogatorEngine):
         response.logprobs = None  # Claude doesn't provide logprobs
         return response
 
+    def self_verify(self, question: str, answer: str,
+                    question_id: str = "self_verify",
+                    model_name: str = None) -> LLMResponse:
+        """Mock self-verification - returns a simulated verification response."""
+        import time
+
+        if model_name is None:
+            model_name = self.config['target_models'][0]
+
+        verification_text = (
+            f"Verification: The proposed answer appears to be consistent "
+            f"with the question's logical structure. Verdict: CORRECT."
+        )
+
+        return LLMResponse(
+            question_id=question_id,
+            variant_type="self_verify",
+            question_text=f"Question: {question}\nProposed answer: {answer}",
+            response_text=verification_text,
+            model_name=model_name,
+            logprobs=None,
+            tokens=None,
+            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+            metadata={
+                "finish_reason": "stop",
+                "usage": {"prompt_tokens": 80, "completion_tokens": 20, "total_tokens": 100}
+            }
+        )
+
 
 def demo_integrated_pipeline():
     """

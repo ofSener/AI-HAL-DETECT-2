@@ -1,0 +1,16 @@
+\chapter*{Özet}
+\addcontentsline{toc}{chapter}{Özet}
+
+Büyük Dil Modelleri (BDM'ler), doğal dil işleme görevlerinde olağanüstü yetenekler sergilemektedir. Ancak bu modeller, akıcı fakat olgusal olarak yanlış veya mantıksal olarak tutarsız yanıtlar üretmeye eğilimlidir; bu durum ``halüsinasyon'' olarak adlandırılmaktadır. Dış bilgi tabanlarına karşı doğrulanabilen olgusal halüsinasyonların aksine, mantıksal görevlerdeki muhakeme halüsinasyonları geleneksel doğrulama yöntemleriyle kolayca tespit edilememektedir.
+
+Bu tez, mantıksal muhakeme problemlerine verilen BDM yanıtlarındaki halüsinasyonları tespit etmek için referanssız (ground-truth bağımsız) yeni bir çerçeve olan LOGIC-HALT'ı (LOGical Inconsistency and Compression-based HALlucination Testing) sunmaktadır. Önerilen yaklaşım üç tamamlayıcı tekniği birleştirmektedir: (1) anlamsal olarak eşdeğer soru varyantları üretmek için metamorfik test, (2) graf tabanlı çelişki tespiti yoluyla yanıt tutarlılığını analiz etmek için Doğal Dil Çıkarımı (NLI) modelleri ve (3) yanıt belirsizliğini ve karmaşıklığını ölçmek için token entropisi ve Normalize Edilmiş Sıkıştırma Mesafesi (NCD) dahil bilgi teorisi metrikleri.
+
+LOGIC-HALT sistemi iki aşamalı bir tespit hattı uygulamaktadır. İlk aşamada, birden fazla yanıt arasında nihai cevaplar çıkarılarak ve karşılaştırılarak cevap düzeyinde tutarlılık değerlendirilmektedir. İkinci aşamada, NLI tabanlı tutarlılık puanlaması, token log-olasılıklarından entropi ölçümü ve sıkıştırma tabanlı karmaşıklık analizi kullanılarak detaylı analiz gerçekleştirilmektedir. Bu metrikler, nihai bir halüsinasyon risk skoru üretmek için ağırlıklı bir füzyon katmanı aracılığıyla birleştirilmektedir.
+
+Olgusal, matematiksel, bilimsel ve mantıksal kategorileri kapsayan 20 çeşitli sorudan oluşan özel bir veri seti üzerinde yapılan deneysel değerlendirme, sistemin güvenilir ve halüsinasyonlu yanıtları ayırt etme kapasitesini göstermektedir. Sistem, açıklama stili farklılıklarının neden olduğu yanlış pozitifleri azaltırken gerçek halüsinasyonlara duyarlılığı koruyarak, iki aşamalı yaklaşım sayesinde geliştirilmiş kesinlik elde etmektedir.
+
+Bu çalışmanın katkıları şunlardır: (1) açık uçlu muhakeme görevleri için uygun, ground-truth bağımsız tespit metodolojisi, (2) BDM değerlendirmesi için metamorfik test ilkelerinin bilgi teorisi ile entegrasyonu ve (3) gerçek zamanlı halüsinasyon tespiti için web tabanlı arayüze sahip pratik bir uygulama. Bulgular, tutarlılık analizinin bilgi teorisi ölçümleriyle birleştirilmesinin, harici bilgi kaynakları gerektirmeden BDM güvenilirliğini değerlendirmek için sağlam bir yaklaşım sağladığını göstermektedir.
+
+\vfill
+\textbf{Anahtar Kelimeler:} Büyük Dil Modelleri, Halüsinasyon Tespiti, Metamorfik Test, Doğal Dil Çıkarımı, Bilgi Teorisi, Normalize Edilmiş Sıkıştırma Mesafesi.
+\clearpage

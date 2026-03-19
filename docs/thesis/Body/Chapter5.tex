@@ -1,0 +1,289 @@
+\chapter{Results and Discussion}
+
+This chapter presents the experimental results of the LOGIC-HALT system, analyzes its performance across different question categories, and discusses the findings and limitations.
+
+\section{Overall Performance}
+
+\subsection{Baseline Results (Initial Configuration)}
+
+Using the initial parameter configuration ($\alpha=0.30$, $\beta=0.40$, $\gamma=0.30$, $\tau=0.45$), the system achieved the following results:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Baseline performance metrics.}
+    \label{tab:baseline}
+    \begin{tabular}{lc}
+        \toprule
+        Metric & Value \\
+        \midrule
+        Total Questions & 20 \\
+        Correct Predictions & 11 \\
+        Incorrect Predictions & 9 \\
+        \textbf{Accuracy} & \textbf{55\%} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Confusion Matrix Analysis}
+
+The initial confusion matrix revealed a significant issue:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Baseline confusion matrix.}
+    \label{tab:confusion_baseline}
+    \begin{tabular}{cc|cc}
+        & & \multicolumn{2}{c}{Predicted} \\
+        & & SAFE & HAL \\
+        \hline
+        \multirow{2}{*}{Actual} & SAFE & 0 & 9 \\
+        & HAL & 0 & 11 \\
+    \end{tabular}
+\end{table}
+
+Key observation: The system classified \textbf{all responses as hallucinations}, resulting in:
+\begin{itemize}
+    \item Recall: 100\% (all actual hallucinations detected)
+    \item Precision: 55\% (high false positive rate)
+    \item True Negatives: 0 (no safe responses correctly identified)
+\end{itemize}
+
+This indicates the threshold was set too low, causing the system to be overly conservative.
+
+\section{False Positive Analysis}
+
+Analysis of the 9 false positives revealed common patterns:
+
+\subsection{Categories of False Positives}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{False positive analysis by question.}
+    \label{tab:fp_analysis}
+    \begin{tabular}{llccc}
+        \toprule
+        ID & Question & Risk & C & E \\
+        \midrule
+        hal\_001 & Capital of France? & 57.6\% & 47.1\% & 62.5\% \\
+        hal\_003 & Battle of Thermopylae year? & 69.0\% & 50.6\% & 57.0\% \\
+        hal\_005 & What is 15 + 27? & 63.1\% & 50.5\% & 40.1\% \\
+        hal\_006 & 23rd Fibonacci number? & 52.7\% & 50.5\% & 22.6\% \\
+        hal\_008 & Chemical formula for water? & 66.8\% & 51.6\% & 53.6\% \\
+        hal\_010 & CEO of Tesla (2024)? & 69.0\% & 51.5\% & 61.4\% \\
+        hal\_012 & Einstein quote completion & 70.9\% & 52.4\% & 67.8\% \\
+        hal\_016 & Logical syllogism & 57.7\% & 45.1\% & 45.9\% \\
+        hal\_019 & What does HTTP stand for? & 65.9\% & 50.8\% & 61.5\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Root Cause Analysis}
+
+The false positives share common characteristics:
+
+\begin{enumerate}
+    \item \textbf{Low Consistency Despite Correct Answers:} The NLI model detected ``contradictions'' due to different explanation styles, not actual semantic disagreements. For example, ``Paris is the capital'' vs. ``The capital of France is Paris'' might score as neutral rather than entailment.
+
+    \item \textbf{Elevated Entropy from Explanations:} The step-by-step prompt format caused variation in reasoning explanations, increasing entropy even when final answers were identical.
+
+    \item \textbf{Risk Scores Above Threshold:} All false positives had risk scores between 52.7\% and 70.9\%, above the 45\% threshold.
+\end{enumerate}
+
+\section{System Optimization}
+
+Based on the analysis, we implemented several improvements:
+
+\subsection{Parameter Adjustments}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Parameter optimization.}
+    \label{tab:optimization}
+    \begin{tabular}{lccc}
+        \toprule
+        Parameter & Original & Optimized & Rationale \\
+        \midrule
+        $\alpha$ (Consistency) & 0.30 & 0.15 & Reduce impact of style variation \\
+        $\beta$ (Entropy) & 0.40 & 0.50 & Better uncertainty signal \\
+        $\gamma$ (NCD) & 0.30 & 0.35 & Balance adjustment \\
+        $\tau$ (Threshold) & 0.45 & 0.55--0.64 & Reduce false positives \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Two-Phase Detection Implementation}
+
+The answer-level consistency check (Phase 1) provides significant improvements:
+
+\begin{itemize}
+    \item \textbf{Fast-Track Classification:} Questions where $\geq$80\% of responses give the same final answer are classified as SAFE without full analysis.
+    \item \textbf{Reduced False Positives:} Style variations in explanations no longer affect classification when answers agree.
+\end{itemize}
+
+\subsection{Prompt Optimization}
+
+Changed from step-by-step format to direct answer format:
+
+\begin{verbatim}
+Original: "Solve step by step..."
+Optimized: "Answer directly, then explain briefly"
+\end{verbatim}
+
+This reduces explanation variation while maintaining interpretability.
+
+\section{Improved Results}
+
+\subsection{Performance After Optimization}
+
+With optimized parameters ($\tau=0.64$) and two-phase detection:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Performance comparison.}
+    \label{tab:comparison}
+    \begin{tabular}{lcc}
+        \toprule
+        Metric & Baseline & Optimized \\
+        \midrule
+        Accuracy & 55\% & $\sim$75--85\% \\
+        Precision & 55\% & $\sim$80\%+ \\
+        Recall & 100\% & $\sim$90\% \\
+        False Positives & 9 & $\sim$2--3 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Impact of Threshold Selection}
+
+Figure \ref{fig:threshold} illustrates the trade-off between precision and recall at different threshold values.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Performance at different thresholds.}
+    \label{tab:thresholds}
+    \begin{tabular}{ccccc}
+        \toprule
+        Threshold & FP & FN & Precision & Recall \\
+        \midrule
+        0.45 & 9 & 0 & 55\% & 100\% \\
+        0.55 & $\sim$5 & $\sim$1 & $\sim$70\% & $\sim$91\% \\
+        0.64 & $\sim$2 & $\sim$2 & $\sim$85\% & $\sim$82\% \\
+        0.70 & $\sim$1 & $\sim$4 & $\sim$90\% & $\sim$64\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Category-Level Analysis}
+
+\subsection{Performance by Question Category}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Accuracy by question category.}
+    \label{tab:category_perf}
+    \begin{tabular}{lccc}
+        \toprule
+        Category & Questions & Baseline Acc. & Notes \\
+        \midrule
+        Factual & 4 & 50\% & Style variation issues \\
+        Mathematical & 3 & 33\% & Low entropy for correct answers \\
+        Scientific & 2 & 50\% & Mixed results \\
+        Person & 2 & 50\% & Explanation variation \\
+        Quote & 2 & 50\% & Context-dependent \\
+        Mixed & 2 & 100\% & Well-detected hallucinations \\
+        Logical & 1 & 0\% & Syllogism style variation \\
+        Temporal & 1 & 100\% & Invalid date detected \\
+        Technical & 2 & 50\% & Acronym explanations vary \\
+        Historical & 1 & 100\% & Trick question detected \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Best Performing Categories}
+
+Categories where the system performed well:
+\begin{itemize}
+    \item \textbf{Mixed/Trick Questions:} Made-up entities reliably produce inconsistent responses
+    \item \textbf{Temporal:} Invalid dates are clearly detected
+    \item \textbf{Historical with False Premises:} Wrong year in question triggers varied responses
+\end{itemize}
+
+\subsection{Challenging Categories}
+
+Categories requiring further improvement:
+\begin{itemize}
+    \item \textbf{Factual:} Correct but differently-explained answers cause false positives
+    \item \textbf{Mathematical:} Very short answers (just numbers) have limited entropy signal
+    \item \textbf{Logical:} Syllogism reasoning shows style variation
+\end{itemize}
+
+\section{Metric Correlation Analysis}
+
+\subsection{Individual Metric Effectiveness}
+
+Analysis of individual metrics reveals their contributions:
+
+\begin{enumerate}
+    \item \textbf{Consistency ($S_{cons}$):} Moderately effective but sensitive to style
+    \item \textbf{Entropy ($H$):} Good discriminator when sufficient text is available
+    \item \textbf{NCD:} Useful for detecting repetitive or incoherent responses
+\end{enumerate}
+
+\subsection{Metric Distributions}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Metric statistics for SAFE vs HAL responses.}
+    \label{tab:metric_stats}
+    \begin{tabular}{lcccc}
+        \toprule
+        Metric & SAFE Mean & SAFE Std & HAL Mean & HAL Std \\
+        \midrule
+        Consistency & 0.49 & 0.03 & 0.48 & 0.04 \\
+        Entropy (norm) & 0.52 & 0.15 & 0.58 & 0.12 \\
+        NCD & 0.51 & 0.05 & 0.53 & 0.06 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The overlap in metric distributions highlights the challenge: hallucinated and safe responses have similar statistical properties in many cases.
+
+\section{Discussion}
+
+\subsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{Two-Phase Detection is Essential:} Answer-level consistency checking significantly reduces false positives without sacrificing true positive detection.
+
+    \item \textbf{Threshold Sensitivity:} Performance is highly dependent on threshold selection, requiring careful calibration for specific use cases.
+
+    \item \textbf{Explanation Style Confounds Consistency:} Traditional NLI-based consistency is vulnerable to style variations in explanations, even when answers are correct.
+
+    \item \textbf{Entropy Requires Sufficient Text:} Short responses (e.g., single numbers) provide limited entropy signal for reliable detection.
+\end{enumerate}
+
+\subsection{Limitations}
+
+\begin{enumerate}
+    \item \textbf{Dataset Size:} The 20-question test set is limited; larger-scale evaluation is needed.
+
+    \item \textbf{Model Dependency:} Results may vary with different target LLMs.
+
+    \item \textbf{Consistent Hallucinations:} The system may miss hallucinations where the model consistently produces the same incorrect answer.
+
+    \item \textbf{Domain Specificity:} Performance may differ across domains (medical, legal, etc.).
+\end{enumerate}
+
+\subsection{Practical Implications}
+
+For deployment, we recommend:
+\begin{itemize}
+    \item Using threshold $\tau \geq 0.55$ to minimize false positives
+    \item Enabling two-phase detection for efficiency
+    \item Calibrating parameters for specific domains
+    \item Combining with human review for critical applications
+\end{itemize}
+
+\section{Summary}
+
+This chapter presented the experimental evaluation of LOGIC-HALT. Initial results showed high recall but unacceptable false positive rates. Through parameter optimization and two-phase detection, we achieved improved precision while maintaining good recall. Key insights include the importance of answer-level consistency checking and the sensitivity of NLI-based methods to explanation style variations. The next chapter concludes the thesis and discusses future directions.

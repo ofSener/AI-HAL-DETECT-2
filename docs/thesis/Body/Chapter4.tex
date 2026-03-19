@@ -1,0 +1,268 @@
+\chapter{Experimental Setup}
+
+This chapter describes the implementation details, dataset construction, evaluation metrics, and experimental configuration used to evaluate the LOGIC-HALT system.
+
+\section{Implementation}
+
+\subsection{Technology Stack}
+
+The LOGIC-HALT system is implemented in Python 3.10 with the following key dependencies:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Software dependencies and versions.}
+    \label{tab:dependencies}
+    \begin{tabular}{llp{7cm}}
+        \toprule
+        Component & Version & Purpose \\
+        \midrule
+        PyTorch & 2.0+ & Deep learning framework \\
+        Transformers & 4.30+ & NLI model loading (Hugging Face) \\
+        OpenAI API & 1.0+ & GPT-4o-mini access \\
+        Flask & 2.3+ & Web interface \\
+        NumPy & 1.24+ & Numerical computations \\
+        Sentence-BERT & - & Semantic similarity filtering \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{System Architecture}
+
+The implementation follows a modular design with separate Python modules for each component:
+
+\begin{itemize}
+    \item \texttt{src/morpher.py}: Variant generation module
+    \item \texttt{src/interrogator.py}: LLM response collection
+    \item \texttt{src/consistency.py}: NLI-based consistency engine
+    \item \texttt{src/complexity.py}: Entropy and NCD computation
+    \item \texttt{src/fusion.py}: Decision fusion layer
+    \item \texttt{src/answer\_validator.py}: Answer extraction and majority voting
+    \item \texttt{src/detector.py}: Main pipeline orchestration
+    \item \texttt{web/app.py}: Flask web interface
+\end{itemize}
+
+\subsection{NLI Model Selection}
+
+For consistency analysis, we use the \texttt{cross-encoder/nli-deberta-v3-base} model from Hugging Face, which provides a good balance between accuracy and inference speed. The model outputs probability distributions over three labels:
+
+\begin{itemize}
+    \item Label 0: Contradiction
+    \item Label 1: Neutral
+    \item Label 2: Entailment
+\end{itemize}
+
+\subsection{Target LLM}
+
+We use OpenAI's GPT-4o-mini as the target LLM for evaluation due to:
+
+\begin{itemize}
+    \item Availability of log-probabilities for entropy calculation
+    \item Consistent API access
+    \item Representative of modern LLM capabilities
+    \item Cost-effectiveness for multiple queries
+\end{itemize}
+
+\section{Dataset Construction}
+
+\subsection{Dataset Overview}
+
+We constructed a test dataset of 20 diverse questions designed to evaluate hallucination detection across different categories and difficulty levels.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Dataset composition by category.}
+    \label{tab:dataset}
+    \begin{tabular}{lccc}
+        \toprule
+        Category & Count & Expected SAFE & Expected HAL \\
+        \midrule
+        Factual & 4 & 2 & 2 \\
+        Mathematical & 3 & 2 & 1 \\
+        Scientific & 2 & 1 & 1 \\
+        Person & 2 & 1 & 1 \\
+        Quote & 2 & 1 & 1 \\
+        Mixed & 2 & 0 & 2 \\
+        Logical & 1 & 1 & 0 \\
+        Temporal & 1 & 0 & 1 \\
+        Technical & 2 & 1 & 1 \\
+        Historical & 1 & 0 & 1 \\
+        \midrule
+        \textbf{Total} & \textbf{20} & \textbf{9} & \textbf{11} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Question Design Principles}
+
+Questions were designed with the following principles:
+
+\begin{enumerate}
+    \item \textbf{SAFE Questions:} Questions with clear, verifiable answers that LLMs should answer correctly (e.g., ``What is the capital of France?'')
+
+    \item \textbf{Hallucination-Prone Questions:} Questions designed to elicit hallucinations:
+    \begin{itemize}
+        \item Made-up entities (fake books, people, compounds)
+        \item Impossible dates (February 30)
+        \item Anachronistic queries (asking about AI in 1945)
+        \item Trick questions with false premises
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Example Questions}
+
+Table \ref{tab:examples} shows representative examples from each category.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Example questions from the test dataset.}
+    \label{tab:examples}
+    \begin{tabular}{p{2.5cm}p{8cm}c}
+        \toprule
+        Category & Question & Expected \\
+        \midrule
+        Factual (SAFE) & What is the capital of France? & SAFE \\
+        Factual (HAL) & What is the ISBN of ``The Theory of Quantum Gravity'' by Stephen Hawking (1987)? & HAL \\
+        Mathematical & What is 15 + 27? & SAFE \\
+        Scientific & What is the molecular structure of Compound X-742? & HAL \\
+        Temporal & What major event happened on February 30, 2020? & HAL \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Evaluation Metrics}
+
+\subsection{Classification Metrics}
+
+We evaluate the system using standard binary classification metrics:
+
+\begin{equation}
+    \text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
+\end{equation}
+
+\begin{equation}
+    \text{Precision} = \frac{TP}{TP + FP}
+\end{equation}
+
+\begin{equation}
+    \text{Recall} = \frac{TP}{TP + FN}
+\end{equation}
+
+\begin{equation}
+    \text{F1-Score} = \frac{2 \cdot \text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item TP (True Positive): Correctly detected hallucination
+    \item TN (True Negative): Correctly identified safe response
+    \item FP (False Positive): Safe response incorrectly flagged as hallucination
+    \item FN (False Negative): Hallucination missed by the system
+\end{itemize}
+
+\subsection{Confusion Matrix}
+
+The confusion matrix provides detailed insight into classification performance:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Confusion matrix structure.}
+    \begin{tabular}{cc|cc}
+        & & \multicolumn{2}{c}{Predicted} \\
+        & & SAFE & HAL \\
+        \hline
+        \multirow{2}{*}{Actual} & SAFE & TN & FP \\
+        & HAL & FN & TP \\
+    \end{tabular}
+\end{table}
+
+\section{Experimental Configuration}
+
+\subsection{Response Generation Parameters}
+
+For each question in the dataset, we generate responses with the following configuration:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Response generation parameters.}
+    \label{tab:gen_params}
+    \begin{tabular}{lc}
+        \toprule
+        Parameter & Value \\
+        \midrule
+        Number of responses per question & 10 \\
+        Temperature & 0.3 \\
+        Max tokens & 600 \\
+        Model & GPT-4o-mini \\
+        Log-probabilities & Enabled (top 5) \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Detection Parameters}
+
+The fusion layer uses the following calibrated parameters:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Detection parameters.}
+    \label{tab:det_params}
+    \begin{tabular}{lcc}
+        \toprule
+        Parameter & Symbol & Value \\
+        \midrule
+        Consistency weight & $\alpha$ & 0.15 \\
+        Entropy weight & $\beta$ & 0.50 \\
+        NCD weight & $\gamma$ & 0.35 \\
+        Decision threshold & $\tau$ & 0.55--0.64 \\
+        Diversity penalty (max) & - & 0.15 \\
+        Minority answer penalty & - & 0.30 \\
+        Answer consistency threshold & - & 80\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Hardware Environment}
+
+Experiments were conducted on:
+
+\begin{itemize}
+    \item CPU: Apple Silicon / Intel-based systems
+    \item RAM: 16 GB minimum
+    \item GPU: Not required (NLI model runs on CPU)
+    \item API: OpenAI API for LLM queries
+\end{itemize}
+
+\section{Web Interface}
+
+A Flask-based web interface was developed to demonstrate the system's capabilities in real-time. The interface allows users to:
+
+\begin{enumerate}
+    \item Enter questions for analysis
+    \item View generated responses with individual risk scores
+    \item Examine detailed metrics (consistency, entropy, NCD)
+    \item See extracted answers and majority voting results
+    \item Access summary statistics
+\end{enumerate}
+
+The web interface runs on \texttt{http://127.0.0.1:5001} and provides both synchronous analysis and API endpoints for programmatic access.
+
+\section{Experimental Procedure}
+
+The evaluation procedure consists of the following steps:
+
+\begin{enumerate}
+    \item \textbf{Dataset Loading:} Load 20 questions from JSON file with ground truth labels
+    \item \textbf{Response Generation:} For each question, generate 10 responses using GPT-4o-mini
+    \item \textbf{Two-Phase Analysis:}
+    \begin{itemize}
+        \item Phase 1: Extract answers and check majority consistency
+        \item Phase 2: If needed, perform full NLI + complexity analysis
+    \end{itemize}
+    \item \textbf{Classification:} Apply threshold to risk scores
+    \item \textbf{Evaluation:} Compare predictions with ground truth labels
+    \item \textbf{Metric Calculation:} Compute accuracy, precision, recall, F1
+\end{enumerate}
+
+\section{Summary}
+
+This chapter described the implementation details including the technology stack, NLI model selection, and target LLM configuration. We presented the dataset construction methodology with 20 diverse questions across 10 categories. Evaluation metrics and experimental parameters were defined, along with the web interface for real-time demonstration. The next chapter presents the experimental results and analysis.

@@ -1,0 +1,683 @@
+\chapter{Experimental Setup}
+
+This chapter presents the implementation details, hardware environment, dataset selection, evaluation methodology, and experimental procedures employed to evaluate the LOGIC-HALT hallucination detection system. All configuration parameters, software versions, and optimization settings reported herein correspond to the actual deployed system.
+
+%% ============================================================
+\section{Implementation}
+%% ============================================================
+
+\subsection{Technology Stack}
+
+The LOGIC-HALT system is implemented in Python 3.10+ and relies on a curated set of libraries spanning deep learning, natural language inference, Bayesian optimization, and web-based demonstration. Table~\ref{tab:dependencies} lists every major dependency together with its minimum version and role within the pipeline.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Software dependencies and minimum versions.}
+    \label{tab:dependencies}
+    \begin{tabular}{llp{7.5cm}}
+        \toprule
+        \textbf{Library} & \textbf{Version} & \textbf{Purpose} \\
+        \midrule
+        PyTorch              & $\geq$ 2.1.0   & Deep learning framework with CUDA 12.8 support \\
+        Transformers         & $\geq$ 4.35.0  & Hugging Face model loading for NLI cross-encoders \\
+        Sentence-Transformers & $\geq$ 2.2.2  & Sentence-BERT embeddings for semantic similarity filtering and ablation \\
+        Optuna               & $\geq$ 3.4.0   & Bayesian hyperparameter optimization (TPE sampler) \\
+        OpenAI API           & $\geq$ 1.3.0   & GPT-4o-mini access for response generation and variant synthesis \\
+        Flask                & $\geq$ 2.3.0   & Web-based demonstration interface \\
+        NetworkX             & $\geq$ 3.2.0   & Contradiction graph construction and analysis \\
+        scikit-learn         & $\geq$ 1.3.0   & Classification metrics and cross-validation utilities \\
+        NumPy                & $\geq$ 1.24.3  & Numerical computations \\
+        pandas               & $\geq$ 2.0.3   & Tabular data handling for optimization trial logs \\
+        Matplotlib / Seaborn & $\geq$ 3.7 / 0.12 & Visualization of heatmaps, graphs, and gauges \\
+        PyYAML               & $\geq$ 6.0.1   & Configuration file parsing \\
+        python-dotenv        & $\geq$ 1.0.0   & Environment variable management for API keys \\
+        tqdm                 & $\geq$ 4.66.1  & Progress bars for batch inference and optimization \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{System Architecture}
+
+The implementation follows a modular, pipeline-oriented design. Each stage of the LOGIC-HALT architecture described in Chapter~3 maps to a dedicated Python module:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Source modules and their architectural roles.}
+    \label{tab:modules}
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Module} & \textbf{Source File} & \textbf{Function} \\
+        \midrule
+        A -- Morpher           & \texttt{src/morpher.py}            & Metamorphic variant generation via LLM \\
+        B -- Interrogator      & \texttt{src/interrogator.py}       & LLM response collection with log-probabilities \\
+        C -- Consistency Engine & \texttt{src/consistency.py}       & Pairwise NLI and contradiction graph analysis \\
+        D -- Complexity Engine  & \texttt{src/complexity.py}        & Entropy and Normalized Compression Distance \\
+        E -- Fusion Layer       & \texttt{src/fusion.py}            & Five-signal weighted decision mechanism \\
+        F -- Answer Validator   & \texttt{src/answer\_validator.py} & Answer extraction and majority voting \\
+        Pipeline Orchestrator   & \texttt{src/detector.py}          & End-to-end integration of Modules A--F \\
+        Web Interface           & \texttt{web/app.py}               & Flask-based real-time demonstration \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Additional scripts support the experimental workflow:
+
+\begin{itemize}
+    \item \texttt{scripts/batch\_api\_helper.py} --- Prepares and manages OpenAI Batch API requests for cost-efficient, large-scale data collection.
+    \item \texttt{scripts/batch\_optimization.py} --- Implements GPU-accelerated Bayesian optimization over pre-computed features.
+    \item \texttt{scripts/ablation\_study.py} --- Runs a systematic ablation study across $2^3 = 8$ signal combinations.
+    \item \texttt{scripts/generate\_visualizations.py} --- Produces publication-quality figures and confusion matrices.
+\end{itemize}
+
+All configuration is centralized in two YAML files: \texttt{config/config.yaml} for hyperparameters and hardware settings, and \texttt{config/prompts.yaml} for all LLM prompt templates.
+
+%% ============================================================
+\subsection{NLI Model Selection}
+\label{sec:nli-model}
+%% ============================================================
+
+For pairwise consistency analysis (Module~C), we employ the \texttt{cross-encoder/nli-deberta-v3-large} model from the Hugging Face Model Hub. This is a 435-million-parameter cross-encoder fine-tuned on the Multi-Genre Natural Language Inference (MultiNLI) corpus. The model accepts a premise--hypothesis pair and outputs a probability distribution over three labels:
+
+\begin{equation}
+    P(\text{label} \mid \text{premise}, \text{hypothesis}) \in \{\text{contradiction}, \text{neutral}, \text{entailment}\}
+    \label{eq:nli-output}
+\end{equation}
+
+\noindent with the label mapping $0 = \text{contradiction}$, $1 = \text{neutral}$, $2 = \text{entailment}$.
+
+The \emph{large} variant was chosen over the \emph{base} variant (184M parameters) because the larger model provides substantially higher accuracy on the MultiNLI benchmark, and the 12\,GB VRAM of our GPU accommodates it comfortably with FP16 inference. Table~\ref{tab:nli-config} summarizes the NLI model configuration.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{NLI model configuration.}
+    \label{tab:nli-config}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Model identifier         & \texttt{cross-encoder/nli-deberta-v3-large} \\
+        Parameters               & 435M \\
+        Inference precision      & FP16 (half-precision on GPU) \\
+        Batch size               & 64 \\
+        Maximum sequence length  & 512 tokens \\
+        Label mapping            & 0 = contradiction, 1 = neutral, 2 = entailment \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+A critical design decision concerns the \emph{hybrid comparison format}. The NLI model compares only the extracted \textsc{ANSWER} portion of each LLM response, not the full text including reasoning. This prevents false positive contradictions that arise merely from different explanation styles, while preserving sensitivity to genuine factual disagreements.
+
+\subsection{Labeling Model}
+\label{sec:label-model}
+
+To compute ground-truth labels for the TruthfulQA dataset, a \emph{separate} NLI model is used: \texttt{microsoft/deberta-large-mnli}. This deliberate separation avoids data leakage---the model used for labeling is entirely distinct from the model used for feature extraction. The labeling procedure is as follows:
+
+\begin{enumerate}
+    \item For each question, the LLM's extracted answer is compared against the dataset's reference ground truth using the labeling NLI model.
+    \item The model outputs probabilities for \emph{entailment}, \emph{neutral}, and \emph{contradiction}.
+    \item The label is assigned according to the following rule:
+    \begin{itemize}
+        \item If $P(\text{entailment}) > 0.5$: label $= 0$ (truthful).
+        \item If $P(\text{contradiction}) > 0.3$: label $= 1$ (hallucination).
+        \item If $P(\text{entailment}) < 0.3$: label $= 1$ (hallucination).
+        \item Otherwise: label $= 0$ (default to truthful when uncertain).
+    \end{itemize}
+\end{enumerate}
+
+This NLI-based labeling scheme is substantially more robust than string matching or cosine similarity, as it accounts for semantic equivalence between differently-worded correct answers.
+
+%% ============================================================
+\subsection{Target LLM}
+%% ============================================================
+
+We evaluate the LOGIC-HALT system using OpenAI's GPT-4o-mini as the target LLM. This model was selected for the following reasons:
+
+\begin{enumerate}
+    \item \textbf{Log-probability access:} The OpenAI API exposes per-token log-probabilities (top-5), which are essential for the entropy signal in Module~D.
+    \item \textbf{Consistent API access:} Deterministic querying with fixed temperature settings yields reproducible results.
+    \item \textbf{Representativeness:} GPT-4o-mini represents the capabilities and failure modes of modern instruction-tuned LLMs while being cost-effective for large-scale experimentation.
+    \item \textbf{Batch API support:} The OpenAI Batch API enables 50\% cost reduction for large-scale data collection, processing requests within a 24-hour window.
+\end{enumerate}
+
+GPT-4o-mini serves a dual role: it generates both the original responses (as the LLM under test) and the semantic variants (as the Morpher backbone). For self-verification, a stronger model (GPT-4o) is used at temperature 0.0 to provide high-quality fact-checking.
+
+Table~\ref{tab:interrogator-config} lists the response generation parameters.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{LLM interrogation parameters.}
+    \label{tab:interrogator-config}
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{Parameter} & \textbf{Response Generation} & \textbf{Variant Generation} \\
+        \midrule
+        Model                    & GPT-4o-mini & GPT-4o-mini \\
+        Temperature              & 0.6         & 0.7         \\
+        Maximum tokens           & 400         & 500         \\
+        Log-probabilities        & Enabled (top 5) & --- \\
+        Samples per query        & 1           & 1 per transformation \\
+        Response format          & ANSWER + REASONING & JSON \{variant, type\} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The structured response format (ANSWER followed by REASONING) is critical to the system's accuracy. By separating the factual claim from its justification, the NLI engine can compare answers directly without being confounded by explanation-style variance.
+
+%% ============================================================
+\section{Datasets}
+\label{sec:datasets}
+%% ============================================================
+
+\subsection{Primary Dataset: TruthfulQA}
+\label{sec:truthfulqa}
+
+The primary evaluation dataset is \textbf{TruthfulQA} \cite{lin2022truthfulqa}, a standard benchmark specifically designed to measure whether language models generate truthful responses. The dataset comprises \textbf{817 questions} across multiple categories that are deliberately crafted to elicit common misconceptions, false beliefs, and factual errors from LLMs. Table~\ref{tab:truthfulqa-overview} provides an overview.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{TruthfulQA dataset overview.}
+    \label{tab:truthfulqa-overview}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Property} & \textbf{Value} \\
+        \midrule
+        Total questions          & 817 \\
+        Question categories      & Health, Law, Finance, Politics, History, Science, etc. \\
+        Design principle         & Questions that elicit false beliefs and misconceptions \\
+        Reference answers        & Ground truth and known wrong answers per question \\
+        Evaluation standard      & Widely used in hallucination detection literature \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Each question in TruthfulQA includes a reference ground truth answer and a set of known incorrect answers. This structure makes it particularly suitable for our evaluation because:
+
+\begin{enumerate}
+    \item The questions are designed to probe specific failure modes of LLMs, such as repeating popular misconceptions.
+    \item The ground truth answers enable automated label computation via NLI entailment (Section~\ref{sec:label-model}).
+    \item The dataset is widely adopted in the hallucination detection literature, facilitating comparison with prior work.
+\end{enumerate}
+
+\subsection{Pilot Dataset}
+\label{sec:pilot-dataset}
+
+During initial development, a custom pilot dataset of \textbf{20 questions} was used for rapid prototyping and debugging. This dataset spans ten categories (factual, mathematical, scientific, person, quote, mixed, logical, temporal, technical, historical) and was designed with known SAFE and hallucination-prone (HAL) questions. Table~\ref{tab:pilot-dataset} shows the composition.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Pilot dataset composition by category.}
+    \label{tab:pilot-dataset}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Category} & \textbf{Count} & \textbf{Expected SAFE} & \textbf{Expected HAL} \\
+        \midrule
+        Factual      & 4 & 2 & 2 \\
+        Mathematical  & 3 & 2 & 1 \\
+        Scientific    & 2 & 1 & 1 \\
+        Person        & 2 & 1 & 1 \\
+        Quote         & 2 & 1 & 1 \\
+        Mixed         & 2 & 0 & 2 \\
+        Logical       & 1 & 1 & 0 \\
+        Temporal      & 1 & 0 & 1 \\
+        Technical     & 2 & 1 & 1 \\
+        Historical    & 1 & 0 & 1 \\
+        \midrule
+        \textbf{Total} & \textbf{20} & \textbf{9} & \textbf{11} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The pilot dataset served exclusively for system integration testing and was not used in the final evaluation. All results reported in Chapter~5 are based solely on the TruthfulQA benchmark.
+
+%% ============================================================
+\subsection{Data Collection via Batch API}
+%% ============================================================
+
+Responses from GPT-4o-mini were collected using the \textbf{OpenAI Batch API}, which processes requests asynchronously within a 24-hour window at 50\% reduced cost. The data collection pipeline proceeds in three stages:
+
+\begin{enumerate}
+    \item \textbf{Variant generation:} For each of the 817 TruthfulQA questions, five semantic variants are generated using the transformations defined in Section~3.3.1 (paraphrase, negation, variable substitution, premise reordering, redundant context). This yields $817 \times 5 = 4{,}085$ variant generation requests.
+
+    \item \textbf{Original response collection:} Each original question is sent to GPT-4o-mini with the structured ANSWER + REASONING prompt format. This produces 817 original responses.
+
+    \item \textbf{Variant response collection:} Each generated variant is independently queried, producing up to $817 \times 5 = 4{,}085$ variant responses.
+\end{enumerate}
+
+The Batch API helper (\texttt{scripts/batch\_api\_helper.py}) automates the preparation of JSONL request files, submission, status monitoring, and result parsing. All responses are organized into a structured JSON format keyed by question ID and variant type.
+
+%% ============================================================
+\section{Evaluation Metrics}
+\label{sec:eval-metrics}
+%% ============================================================
+
+\subsection{Classification Metrics}
+
+Hallucination detection is formulated as a binary classification task where the positive class represents a hallucination. We evaluate the system using four standard metrics:
+
+\begin{equation}
+    \text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
+    \label{eq:accuracy}
+\end{equation}
+
+\begin{equation}
+    \text{Precision} = \frac{TP}{TP + FP}
+    \label{eq:precision}
+\end{equation}
+
+\begin{equation}
+    \text{Recall} = \frac{TP}{TP + FN}
+    \label{eq:recall}
+\end{equation}
+
+\begin{equation}
+    \text{F1\text{-}Score} = \frac{2 \cdot \text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}
+    \label{eq:f1}
+\end{equation}
+
+\noindent where the confusion matrix elements are defined as:
+
+\begin{itemize}
+    \item $TP$ (True Positive): Hallucination correctly detected.
+    \item $TN$ (True Negative): Truthful response correctly classified as safe.
+    \item $FP$ (False Positive): Truthful response incorrectly flagged as hallucination.
+    \item $FN$ (False Negative): Hallucination missed by the system.
+\end{itemize}
+
+\subsection{Confusion Matrix}
+
+The confusion matrix provides granular insight into the classifier's error distribution:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Confusion matrix structure for hallucination detection.}
+    \label{tab:confusion-matrix}
+    \begin{tabular}{cc|cc}
+        & & \multicolumn{2}{c}{\textbf{Predicted}} \\
+        & & SAFE & HAL \\
+        \hline
+        \multirow{2}{*}{\textbf{Actual}} & SAFE & $TN$ & $FP$ \\
+        & HAL & $FN$ & $TP$ \\
+    \end{tabular}
+\end{table}
+
+In the context of hallucination detection, \textbf{false negatives} (missed hallucinations) are particularly dangerous in safety-critical applications, while \textbf{false positives} (unnecessary flags on truthful content) degrade user trust. The F1-score provides a balanced view, and we additionally report precision and recall separately to characterize the trade-off.
+
+\subsection{Optimization Objective}
+\label{sec:opt-objective}
+
+The Bayesian optimization procedure uses a \textbf{precision-balanced F1 objective} rather than raw F1. Specifically, if precision falls below a minimum threshold of 0.60, the objective value is penalized:
+
+\begin{equation}
+    \text{Objective} =
+    \begin{cases}
+        F_1 \cdot \frac{P}{0.60}          & \text{if } P < 0.60 \\[6pt]
+        F_1 \cdot \bigl(1 + 0.15 \cdot \min(P - 0.60,\; 0.35)\bigr) & \text{otherwise}
+    \end{cases}
+    \label{eq:objective}
+\end{equation}
+
+\noindent where $P$ denotes precision and $F_1$ denotes the F1-score. This objective encourages the optimizer to find configurations that maintain acceptable precision while maximizing overall detection performance.
+
+%% ============================================================
+\section{Experimental Configuration}
+\label{sec:experimental-config}
+%% ============================================================
+
+\subsection{Five-Signal Fusion Parameters}
+
+The fusion layer (Module~E) combines five signals to produce a scalar hallucination risk score. Each signal is normalized to the $[0, 1]$ range where higher values indicate greater suspicion of hallucination:
+
+\begin{equation}
+    \text{Risk} = w_1 \cdot S_{\text{sv}} + w_2 \cdot S_{\text{incon}} + w_3 \cdot S_{\text{ent}} + w_4 \cdot S_{\text{ncd}} + w_5 \cdot S_{\text{mp}}
+    \label{eq:fusion-formula}
+\end{equation}
+
+\noindent where the five signals and their optimized weights are listed in Table~\ref{tab:fusion-weights}.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Optimized five-signal fusion weights (500 trials, 817 questions).}
+    \label{tab:fusion-weights}
+    \begin{tabular}{clcc}
+        \toprule
+        \textbf{Symbol} & \textbf{Signal} & \textbf{Weight} & \textbf{Description} \\
+        \midrule
+        $w_1$ & Self-Verification ($S_{\text{sv}}$)       & 0.0852 & NLI contradiction between original and variant answers \\
+        $w_2$ & Inconsistency ($S_{\text{incon}}$)        & 0.2120 & Self-consistency: $1 - \text{consistency score}$ \\
+        $w_3$ & Entropy ($S_{\text{ent}}$)                & 0.1493 & Normalized average token entropy \\
+        $w_4$ & NCD ($S_{\text{ncd}}$)                    & 0.1616 & Pairwise Normalized Compression Distance \\
+        $w_5$ & Minority Penalty ($S_{\text{mp}}$)        & 0.3919 & Majority voting disagreement penalty \\
+        \midrule
+        $\tau$ & Hallucination threshold                   & 0.2848 & Decision boundary for binary classification \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The dominance of the minority penalty weight ($w_5 = 0.3919$) is noteworthy: it indicates that answer-level disagreement among variants is the single strongest predictor of hallucination, consistent with the hypothesis that factually grounded answers exhibit higher inter-variant stability.
+
+\subsection{NLI Consistency Parameters}
+
+The consistency engine applies learned thresholds to the NLI probability outputs:
+
+\begin{table}[!htbp]
+    \centering
+    \caption{NLI consistency engine parameters (Bayesian-optimized).}
+    \label{tab:nli-params}
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{Parameter} & \textbf{Symbol} & \textbf{Value} \\
+        \midrule
+        Contradiction weight    & $w_c$ & 0.6353 \\
+        Neutral weight          & $w_n$ & 0.6432 \\
+        Entailment weight       & $w_e$ & 0.0    \\
+        Minimum edge weight     & $\theta_{\text{edge}}$ & 0.5551 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+For each pair of responses $(r_i, r_j)$, a combined contradiction score is computed as:
+
+\begin{equation}
+    s_{ij} = w_c \cdot P(\text{contradiction} \mid r_i, r_j) + w_n \cdot P(\text{neutral} \mid r_i, r_j)
+    \label{eq:nli-scoring}
+\end{equation}
+
+An edge is added to the contradiction graph whenever $s_{ij} > \theta_{\text{edge}}$. The overall consistency score is then derived from the graph density, average contradiction strength, and fragmentation (number of connected components).
+
+\subsection{Complexity Engine Parameters}
+
+Table~\ref{tab:complexity-params} lists the parameters governing the entropy and NCD computations.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Complexity engine parameters.}
+    \label{tab:complexity-params}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Compression algorithm     & zlib \\
+        Entropy method            & Token-level ($-\frac{1}{T}\sum_t \log p(x_t)$) \\
+        Entropy normalization max & 6.29 bits \\
+        NCD normalization max     & 0.7978 \\
+        NCD computation           & Pairwise across all response pairs \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Entropy is calculated from per-token log-probabilities provided by the OpenAI API. The pairwise NCD is computed using the standard formula:
+
+\begin{equation}
+    \text{NCD}(x, y) = \frac{C(xy) - \min(C(x), C(y))}{\max(C(x), C(y))}
+    \label{eq:ncd}
+\end{equation}
+
+\noindent where $C(\cdot)$ denotes the compressed length using zlib. The average pairwise NCD across all response pairs for a given question is used as the fusion signal.
+
+\subsection{Answer Validator Parameters}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Answer validator parameters.}
+    \label{tab:answer-validator}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Minority penalty          & 0.05 \\
+        Minimum responses         & 3 \\
+        High confidence threshold & 80\% majority agreement \\
+        Low confidence threshold  & 50\% majority agreement \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The answer validator extracts the core factual answer from each structured response using regular expression patterns and then performs majority voting. Responses whose extracted answer disagrees with the majority receive a penalty that is incorporated into the minority penalty signal ($S_{\text{mp}}$).
+
+\subsection{Morpher Transformation Parameters}
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Morpher (Module A) configuration.}
+    \label{tab:morpher-config}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Number of variants per question  & 5 \\
+        Generation model                 & GPT-4o-mini \\
+        Temperature                      & 0.7 \\
+        Maximum tokens                   & 500 \\
+        Similarity threshold             & 0.75 (cosine, Sentence-BERT) \\
+        Similarity model                 & \texttt{all-MiniLM-L6-v2} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Five transformation types are applied to each question: \emph{paraphrase}, \emph{negation} (double negation or contrapositive), \emph{variable substitution}, \emph{premise reordering}, and \emph{redundant context injection}. A variant is retained only if its cosine similarity to the original question exceeds 0.75, ensuring semantic equivalence while encouraging syntactic diversity.
+
+%% ============================================================
+\section{Bayesian Optimization}
+\label{sec:bayesian-opt}
+%% ============================================================
+
+\subsection{Optimization Framework}
+
+Hyperparameter optimization is performed using Optuna~\cite{akiba2019optuna} with the Tree-structured Parzen Estimator (TPE) sampler. The optimization search space encompasses the five fusion weights, the decision threshold, NLI scoring parameters, and normalization bounds---13 hyperparameters in total. Table~\ref{tab:opt-config} summarizes the optimization configuration.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Bayesian optimization configuration.}
+    \label{tab:opt-config}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Framework                   & Optuna 3.4+ \\
+        Sampler                     & TPE (Tree-structured Parzen Estimator) \\
+        Number of trials            & 500 \\
+        Startup trials (random)     & 15 \\
+        Objective                   & Precision-balanced F1 (Equation~\ref{eq:objective}) \\
+        Dataset                     & TruthfulQA (817 questions) \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Search Space}
+
+Table~\ref{tab:search-space} defines the search ranges for all optimized hyperparameters.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Hyperparameter search space.}
+    \label{tab:search-space}
+    \begin{tabular}{llcc}
+        \toprule
+        \textbf{Parameter} & \textbf{Role} & \textbf{Min} & \textbf{Max} \\
+        \midrule
+        $\alpha$ (self-verification weight)    & Fusion weight  & 0.05 & 0.50 \\
+        $\beta$ (inconsistency weight)         & Fusion weight  & 0.05 & 0.40 \\
+        $\gamma$ (entropy weight)              & Fusion weight  & 0.05 & 0.30 \\
+        $\delta$ (NCD weight)                  & Fusion weight  & 0.01 & 0.30 \\
+        $\epsilon$ (minority penalty weight)   & Derived: $1 - \alpha - \beta - \gamma - \delta$ & 0.00 & 0.40 \\
+        Hallucination threshold                & Decision boundary & 0.20 & 0.70 \\
+        min\_edge\_weight                      & NLI graph threshold & 0.15 & 0.60 \\
+        contradiction\_weight ($w_c$)          & NLI scoring & 0.50 & 1.00 \\
+        neutral\_weight ($w_n$)                & NLI scoring & 0.20 & 0.70 \\
+        entropy\_max                           & Normalization bound & 5.0 & 15.0 \\
+        ncd\_max                               & Normalization bound & 0.50 & 1.00 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The minority penalty weight $\epsilon$ is not independently sampled; it is derived as the residual $\epsilon = 1 - \alpha - \beta - \gamma - \delta$, ensuring that the five weights always sum to unity. Trials where $\epsilon < 0$ or $\epsilon > 0.40$ are pruned.
+
+\subsection{Pre-Computation Strategy}
+\label{sec:precompute}
+
+A key engineering contribution is the \textbf{pre-computation strategy} that decouples GPU-intensive NLI inference from the optimization loop. Before the first trial begins, the following quantities are computed once and cached in memory:
+
+\begin{enumerate}
+    \item \textbf{NLI pair scores:} For every pair of responses within each question, the NLI model produces contradiction and neutral probabilities. These raw probabilities are stored, and each trial applies its own threshold and weighting parameters to derive the consistency score.
+
+    \item \textbf{Self-verification scores:} NLI contradiction probabilities between the original response and each variant response.
+
+    \item \textbf{Minority penalties:} Answer extraction and majority voting results for all 817 questions.
+
+    \item \textbf{Pairwise NCD:} Average pairwise Normalized Compression Distance for all response sets.
+
+    \item \textbf{Token entropy:} Per-question average token entropy.
+\end{enumerate}
+
+This strategy reduces each optimization trial to a simple arithmetic operation over cached values, achieving approximately \textbf{0.01 seconds per trial}. The entire 500-trial optimization thus completes in under one minute of wall-clock time (excluding the one-time pre-computation phase).
+
+%% ============================================================
+\section{Hardware Environment}
+\label{sec:hardware}
+%% ============================================================
+
+All experiments were conducted on a single workstation whose specifications are listed in Table~\ref{tab:hardware}.
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Hardware configuration.}
+    \label{tab:hardware}
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{Component} & \textbf{Specification} \\
+        \midrule
+        GPU   & NVIDIA GeForce RTX 5070 (12\,GB GDDR7 VRAM) \\
+        CPU   & AMD Ryzen 5 7500F (6 cores, 12 threads) \\
+        RAM   & 32\,GB DDR5 \\
+        CUDA  & 12.8 \\
+        OS    & Windows 11 Pro \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The following CUDA optimizations are enabled to maximize GPU throughput:
+
+\begin{itemize}
+    \item \texttt{torch.backends.cudnn.benchmark = True} --- Automatic convolution algorithm tuning.
+    \item \texttt{torch.backends.cuda.matmul.allow\_tf32 = True} --- TF32 tensor core acceleration for matrix multiplications.
+    \item \texttt{torch.backends.cudnn.allow\_tf32 = True} --- TF32 for cuDNN operations.
+    \item \textbf{FP16 mixed precision:} The NLI model weights are converted to half-precision (\texttt{model.half()}) for inference, halving memory consumption and approximately doubling throughput.
+\end{itemize}
+
+With these optimizations, the 435M-parameter NLI model operates comfortably within the 12\,GB VRAM budget at a batch size of 64. The estimated GPU memory usage during batch NLI inference is approximately $2 + 64 \times 0.05 \approx 5.2$\,GB.
+
+%% ============================================================
+\section{Ablation Study Design}
+\label{sec:ablation-design}
+%% ============================================================
+
+To quantify the contribution of three newly proposed signals, a systematic ablation study is conducted. The three signals under investigation are:
+
+\begin{enumerate}
+    \item \textbf{Negation Contradiction (Neg):} Detects whether the LLM agrees with both a claim and its logical negation. If the NLI model finds high entailment between the original response and the negation-variant response, the model is exhibiting logical inconsistency.
+
+    \item \textbf{Factual Token Variance (FTV):} Measures the stability of factual content (numbers, proper nouns) across variant responses using Jaccard distance. High variance in factual tokens suggests confabulation.
+
+    \item \textbf{Semantic Answer Matching (SAM):} Replaces exact string matching in majority voting with Sentence-BERT cosine similarity. Answers with low average semantic similarity to other answers are identified as outliers.
+\end{enumerate}
+
+The ablation enumerates all $2^3 = 8$ combinations, including the baseline (no new signals) and the full model (all three). Each configuration undergoes independent Bayesian optimization with 500 trials and 30 startup trials, using the precision-balanced F1 objective (Equation~\ref{eq:objective}).
+
+\begin{table}[!htbp]
+    \centering
+    \caption{Ablation study signal combinations.}
+    \label{tab:ablation-combos}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Configuration} & \textbf{Neg} & \textbf{FTV} & \textbf{SAM} & \textbf{Total Signals} \\
+        \midrule
+        Baseline           & ---           & ---          & ---          & 5 \\
+        Neg                & \checkmark    & ---          & ---          & 6 \\
+        FTV                & ---           & \checkmark   & ---          & 6 \\
+        SAM                & ---           & ---          & \checkmark   & 6 \\
+        Neg+FTV            & \checkmark    & \checkmark   & ---          & 7 \\
+        Neg+SAM            & \checkmark    & ---          & \checkmark   & 7 \\
+        FTV+SAM            & ---           & \checkmark   & \checkmark   & 7 \\
+        Neg+FTV+SAM        & \checkmark    & \checkmark   & \checkmark   & 8 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%% ============================================================
+\section{Web Interface}
+\label{sec:web-interface}
+%% ============================================================
+
+A Flask-based web interface provides real-time demonstration of the LOGIC-HALT system, accessible at \texttt{http://127.0.0.1:5000}. The interface supports two modes of operation:
+
+\begin{enumerate}
+    \item \textbf{Multi-Response Analysis Mode:} The user enters a question; the system generates 10 responses from GPT-4o-mini (all at temperature 0.3), performs the full LOGIC-HALT analysis pipeline (consistency, entropy, NCD, majority voting, fusion), and displays per-response risk scores with explanations.
+
+    \item \textbf{Question--Answer Pair Verification Mode:} The user provides both a question and a candidate answer. The system generates three variant responses at different temperatures (0.3, 0.5, 0.7), compares the user's answer against these variants using NLI consistency analysis, and renders a hallucination verdict.
+\end{enumerate}
+
+Both modes employ a \textbf{two-phase detection} strategy:
+
+\begin{itemize}
+    \item \textbf{Phase 1 (Fast Check):} Extract answers from all responses and perform majority voting. If $\geq 80\%$ of responses agree, the question is fast-tracked to a ``safe'' classification without full NLI analysis.
+    \item \textbf{Phase 2 (Detailed Analysis):} If Phase~1 detects disagreement, the full pipeline is invoked---NLI contradiction matrix construction, complexity analysis, and five-signal fusion.
+\end{itemize}
+
+The web interface also exposes a \texttt{/health} endpoint for monitoring, a \texttt{/statistics} endpoint for aggregate performance metrics, and a \texttt{/save\_labels} endpoint for collecting human annotations.
+
+%% ============================================================
+\section{Experimental Procedure}
+\label{sec:procedure}
+%% ============================================================
+
+The complete evaluation procedure consists of the following sequential stages:
+
+\begin{enumerate}
+    \item \textbf{Dataset Loading:} Load the TruthfulQA dataset (817 questions) with ground truth and wrong answers from \texttt{data/raw/truthfulqa\_dataset.json}.
+
+    \item \textbf{Response Collection:} Use the OpenAI Batch API to collect:
+    \begin{itemize}
+        \item 817 original responses (one per question).
+        \item $\leq 4{,}085$ variant responses (up to 5 variants $\times$ 817 questions).
+        \item $\leq 4{,}085$ variant text generations (Morpher output).
+    \end{itemize}
+    Batch processing provides 50\% cost savings compared to synchronous API calls.
+
+    \item \textbf{Label Computation:} Compute binary labels (0 = truthful, 1 = hallucination) for all 817 questions by comparing the LLM's extracted answer to the ground truth using the \texttt{microsoft/deberta-large-mnli} labeling model (Section~\ref{sec:label-model}).
+
+    \item \textbf{Feature Pre-Computation on GPU:} Run all NLI inferences in batch mode on the RTX~5070 with FP16 precision to compute:
+    \begin{itemize}
+        \item All pairwise NLI scores between variant responses.
+        \item Self-verification contradiction scores.
+        \item Minority penalties via answer extraction and majority voting.
+        \item Pairwise NCD and average token entropy.
+    \end{itemize}
+    All features are cached in memory, eliminating repeated GPU computation during optimization.
+
+    \item \textbf{Bayesian Optimization:} Execute 500 Optuna trials with the TPE sampler to identify optimal fusion weights, decision threshold, and NLI parameters. Each trial evaluates a candidate configuration across all 817 questions using the cached features.
+
+    \item \textbf{Evaluation:} Apply the best-found configuration to compute precision, recall, F1-score, and accuracy. Generate confusion matrix for detailed error analysis.
+
+    \item \textbf{Ablation Study:} Repeat the optimization for each of the 8 signal combinations (Table~\ref{tab:ablation-combos}) using 500 trials per combination. Compare F1, precision, and recall across configurations to quantify the marginal contribution of each new signal.
+\end{enumerate}
+
+%% ============================================================
+\section{Reproducibility}
+\label{sec:reproducibility}
+%% ============================================================
+
+To facilitate reproducibility, the following measures are in place:
+
+\begin{itemize}
+    \item All configuration parameters are stored in version-controlled YAML files (\texttt{config/config.yaml}, \texttt{config/prompts.yaml}).
+    \item Optimization results, including best parameters and full trial histories, are persisted in \texttt{config/optimization\_results/} as JSON files.
+    \item The Optuna TPE sampler is seeded (seed = 42) for the ablation study to ensure deterministic trial ordering.
+    \item Batch API results are stored as organized JSON files in \texttt{data/batch\_results/}, enabling re-execution of the optimization without additional API calls.
+    \item The complete source code is available in the project repository.
+\end{itemize}
+
+%% ============================================================
+\section{Summary}
+%% ============================================================
+
+This chapter has presented the complete experimental setup for evaluating the LOGIC-HALT system. The implementation employs a modular Python architecture built on PyTorch, Hugging Face Transformers, and Optuna, running on an NVIDIA RTX~5070 GPU with FP16 mixed precision. The primary evaluation dataset is TruthfulQA (817 questions), with labels computed via a separate NLI model to avoid data leakage. Response collection leverages the OpenAI Batch API for 50\% cost reduction. A pre-computation strategy decouples GPU inference from the Bayesian optimization loop, enabling 500 trials to complete in under one minute. The ablation study systematically evaluates all $2^3 = 8$ combinations of three newly proposed signals. A Flask-based web interface provides real-time demonstration with two-phase detection. The next chapter presents the experimental results and their analysis.

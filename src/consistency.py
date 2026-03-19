@@ -119,11 +119,16 @@ class ConsistencyEngine:
         # Load DeBERTa NLI cross-encoder model
         try:
             # Try multiple NLI models in order of preference
-            nli_models = [
-                "cross-encoder/nli-deberta-v3-base",      # Best option: trained specifically for NLI
-                "cross-encoder/nli-deberta-v3-large",     # Larger version
-                "microsoft/deberta-v3-base",              # Base model (no NLI fine-tuning)
+            # Build fallback chain: [user-requested] → large → base, deduplicated
+            _default_fallback = [
+                "cross-encoder/nli-deberta-v3-large",     # Best option: larger NLI model
+                "cross-encoder/nli-deberta-v3-base",      # Smaller NLI-fine-tuned model
             ]
+            # If the caller passed a non-default model, try it first
+            if nli_model_name != "cross-encoder/nli-deberta-v3-base":
+                nli_models = [nli_model_name] + [m for m in _default_fallback if m != nli_model_name]
+            else:
+                nli_models = list(_default_fallback)
 
             model_loaded = False
             for model_name in nli_models:
@@ -276,6 +281,45 @@ class ConsistencyEngine:
                 matrix[j][i] = contradiction_score
 
         return matrix
+
+    def compute_verification_score(self, original_answer: str, verification: str) -> float:
+        """
+        Compute a contradiction score between an original answer and a self-verification response.
+
+        Uses NLI to compare the ANSWER portions of both texts in both directions
+        (NLI is asymmetric), mirroring the scoring logic of build_contradiction_matrix.
+
+        Args:
+            original_answer: The original LLM response
+            verification: The self-verification LLM response
+
+        Returns:
+            Contradiction score (0-1, higher = more contradictory)
+        """
+        # Extract ANSWER portions using the existing helper
+        answer_a = extract_answer(original_answer)
+        answer_b = extract_answer(verification)
+
+        # Predict NLI in both directions (same as build_contradiction_matrix)
+        label_ab, conf_ab = self.predict_nli(answer_a, answer_b)
+        label_ba, conf_ba = self.predict_nli(answer_b, answer_a)
+
+        # Scoring logic identical to build_contradiction_matrix
+        if label_ab == "contradiction" or label_ba == "contradiction":
+            contradiction_score = max(
+                conf_ab if label_ab == "contradiction" else 0,
+                conf_ba if label_ba == "contradiction" else 0
+            )
+        elif label_ab == "neutral" and label_ba == "neutral":
+            contradiction_score = (conf_ab + conf_ba) / 2 * 0.5
+        elif label_ab == "neutral" or label_ba == "neutral":
+            neutral_conf = conf_ab if label_ab == "neutral" else conf_ba
+            contradiction_score = neutral_conf * 0.3
+        else:
+            # Both entailment = fully consistent
+            contradiction_score = 0.0
+
+        return contradiction_score
 
     def build_graph(self,
                    contradiction_matrix: np.ndarray,

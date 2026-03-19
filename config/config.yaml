@@ -46,10 +46,22 @@ interrogator:
   target_models:
     - "gpt-4o-mini"
 
+  # Stronger model for self-verification (fact-checking quality matters)
+  verification_model: "gpt-4o"
+
   temperature: 0.6
   max_tokens: 400
   return_logprobs: true
   n_samples: 1
+
+
+# ========================================
+# SELF-VERIFICATION Settings (Phase 2)
+# ========================================
+self_verification:
+  temperature: 0.0       # Deterministic verification
+  max_tokens: 400
+  enabled: true          # Set false to skip self-verification (saves 1 API call/question)
 
 
 # ========================================
@@ -82,17 +94,20 @@ complexity:
 
 # ========================================
 # FUSION LAYER (Module E) Settings
-# 4-weight fusion with GT contradiction as PRIMARY signal
-# OPTIMIZED: Bayesian optimization with 500 trials
-# RESULT: F1=0.7730, Precision=0.9770, Recall=0.6395
+# 5-signal fusion (no GT dependency - all signals available at inference)
+# Weights are initial guesses - will be re-optimized via batch_optimization.py
+# Previous GT-based results (NOT reproducible at inference):
+#   F1=0.7730, Precision=0.9770, Recall=0.6395
 # ========================================
 fusion:
-  alpha: 0.6161   # GT Contradiction weight (PRIMARY - compares response to ground truth)
-  beta: 0.0658    # Inconsistency weight (self-consistency between variants)
-  gamma: 0.2988   # Entropy weight
-  delta: 0.0194   # NCD weight
+  # 5-signal weights (optimized: 500 trials, F1=0.7346, 817 questions)
+  weight_self_verification: 0.0852   # NLI contradiction between original and variant answers
+  weight_inconsistency: 0.2120       # Self-consistency between variant responses
+  weight_entropy: 0.1493             # Token entropy from logprobs
+  weight_ncd: 0.1616                 # Pairwise Normalized Compression Distance
+  weight_minority_penalty: 0.3919    # Answer extraction majority vote penalty (PRIMARY)
 
-  hallucination_threshold: 0.5216
+  hallucination_threshold: 0.2848
   safe_threshold: 0.30
   suspicious_threshold: 0.40
 
@@ -121,7 +136,8 @@ dataset:
 
 # ========================================
 # OPTIMIZATION Settings (Bayesian)
-# Last optimization: 2026-02-02
+# Last optimization: 2026-02-02 (GT-based, deprecated)
+# Re-optimization needed with 5-signal system
 # ========================================
 optimization:
   n_trials: 500
@@ -132,11 +148,11 @@ optimization:
   # Optuna parallelization
   n_jobs: 1  # Sequential (API rate limits)
 
-  # Best results achieved:
-  best_f1_score: 0.7730
-  best_precision: 0.9770
-  best_recall: 0.6395
-  best_accuracy: 0.7858
+  # Previous GT-based results (NOT valid at inference):
+  # best_f1_score: 0.7730 (used ground truth at inference - invalid)
+  # Current 5-signal results (honest, inference-time only):
+  best_f1_score: 0.7346
+  # best optimized: 2026-03-19, 500 trials, 817 questions
 
 
 # ========================================

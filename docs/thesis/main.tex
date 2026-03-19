@@ -1,0 +1,146 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% LOGIC-HALT Graduation Project Thesis
+% Gebze Technical University - Computer Engineering Department
+%
+% Student: Ömer Faruk ŞENER
+% Advisor: Dr. Öğr. Üyesi Tülay AYYILDIZ
+% Year: 2026
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[12pt]{report}
+
+
+% Language and typeset setting
+\usepackage[english]{babel}
+\usepackage[a4paper,top=25mm,bottom=25mm,left=40mm,right=25mm]{geometry}
+\usepackage[onehalfspacing]{setspace}
+\usepackage{indentfirst}
+\setlength{\parindent}{1cm}
+\setlength{\abovecaptionskip}{12pt plus 0pt minus 0pt}
+\setlength{\belowcaptionskip}{12pt plus 0pt minus 0pt}
+\setlength{\textfloatsep}{18.0pt plus 0.0pt minus 0.0pt}
+\setlength{\floatsep}{18.0pt plus 0.0pt minus 0.0pt}
+\setlength{\intextsep}{18.0pt plus 0.0pt minus 0.0pt}
+\setlength{\skip\footins}{18.0pt plus 0.0pt minus 0.0pt}
+
+% Core packages and settings
+\usepackage[colorlinks=false]{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\newtheorem{definition}{Definition}[chapter]
+
+\usepackage{titlesec} %setting the titles of chapters and sections
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{4}
+\titleformat{\chapter}[hang]{\normalfont\bfseries\MakeUppercase}{}{0pt}{\LARGE\thechapter. }
+\titleformat{\section}[hang]{\normalfont\bfseries}{}{0pt}{\Large\thesection. }
+\titleformat{\subsection}[hang]{\normalfont\bfseries}{}{0pt}{\large\thesubsection. }
+\titleformat{\subsubsection}[hang]{\normalfont\bfseries}{}{0pt}{\large\thesubsubsection. }
+\titlespacing*{\chapter}{0pt}{0pt}{18pt}
+\titlespacing*{\section}{0pt}{18pt}{18pt}
+\titlespacing*{\subsection}{0pt}{18pt}{18pt}
+\titlespacing*{\subsubsection}{0pt}{18pt}{18pt}
+
+\usepackage{graphicx}
+\graphicspath{{./Imgs/}} %pointing the directory of images
+
+\usepackage{fancyhdr} % setting footers
+\usepackage{etoolbox}
+\renewcommand{\headrulewidth}{0pt}
+\patchcmd{\chapter}{\thispagestyle{plain}}{\thispagestyle{fancy}}{}{}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\fontsize{11pt}{11pt}\thepage}
+
+\usepackage[style=ieee]{biblatex}
+\addbibresource{refs.bib}
+\usepackage{csquotes}% Needed for babel(in biblatex)
+
+\usepackage[bottom, perpage]{footmisc}%% makes footnotes at the bottom
+
+\usepackage{GTUThesis}
+
+
+% Additional packages
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{subcaption}
+
+% Code listing style
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red}
+}
+
+
+% Important information
+\title{LOGIC-HALT: A Hybrid Metamorphic Testing and Information Theory Algorithm for Hallucination Detection in Large Language Models}
+\author{Ömer Faruk ŞENER}
+\faculty{Faculty of Engineering}
+\department{Computer Engineering Department}
+\supervisor{Dr. Öğr. Üyesi Tülay AYYILDIZ}
+\theyear{2026}
+
+
+\begin{document}
+
+%Front Matter
+\pagenumbering{roman} %start with roman numbering
+\projecttitlepageenglish
+\maketitle
+\setcounter{page}{3} %the first two title pages are not counted so this is a buffer
+\begin{outertitles} % makes titles centred
+
+% Jury information
+\makejury{January 2026}{Doç. Dr. Habil KALKAN}
+\input{./Body/Frontmatter/Abstract}
+\input{./Body/Frontmatter/Ozet}
+\input{./Body/Frontmatter/Acknowledgement}
+\input{./Body/Frontmatter/ListOfAcro}
+
+\tableofcontents
+\addcontentsline{toc}{chapter}{Contents}
+\clearpage
+
+\listoffigures
+\addcontentsline{toc}{chapter}{List of Figures}
+\clearpage
+
+\listoftables
+\addcontentsline{toc}{chapter}{List of Tables}
+\clearpage
+
+\end{outertitles}
+\fancyhf{}%reset footer
+\fancyfoot[R]{\fontsize{11pt}{11pt}\thepage}%page numbers in the corner
+\addtocontents{toc}{\protect\vspace{18pt}}
+\pagenumbering{arabic}%turn to arabic numbers
+
+% Mainmatter - Chapters
+\input{./Body/Mainmatter/Chapter1}  % Introduction
+\input{./Body/Mainmatter/Chapter2}  % Related Work
+\input{./Body/Mainmatter/Chapter3}  % Methodology
+\input{./Body/Mainmatter/Chapter4}  % Experimental Setup
+\input{./Body/Mainmatter/Chapter5}  % Results and Discussion
+\input{./Body/Mainmatter/Chapter6}  % Conclusion
+
+
+% Backmatter
+\begin{outertitles}
+\clearpage
+\setlength{\emergencystretch}{1em}
+\printbibliography
+\addtocontents{toc}{\protect\vspace{18pt}}
+\addcontentsline{toc}{chapter}{Bibliography}
+\input{./Body/Backmatter/CV}
+\input{./Body/Backmatter/Appendices}
+\end{outertitles}
+\end{document}

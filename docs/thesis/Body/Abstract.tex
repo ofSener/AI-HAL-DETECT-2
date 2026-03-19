@@ -1,0 +1,16 @@
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+Large Language Models (LLMs) have demonstrated remarkable capabilities in natural language processing tasks. However, they are prone to generating fluent but factually incorrect or logically inconsistent responses, a phenomenon known as ``hallucination.'' Unlike factual hallucinations that can be verified against external knowledge bases, reasoning hallucinations in logical tasks cannot be easily detected through traditional fact-checking methods.
+
+This thesis presents LOGIC-HALT (LOGical Inconsistency and Compression-based HALlucination Testing), a novel reference-free framework for detecting hallucinations in LLM responses to logical reasoning problems. The proposed approach combines three complementary techniques: (1) metamorphic testing to generate semantically equivalent question variants, (2) Natural Language Inference (NLI) models to analyze response consistency through graph-based contradiction detection, and (3) information-theoretic metrics including token entropy and Normalized Compression Distance (NCD) to measure response uncertainty and complexity.
+
+The LOGIC-HALT system implements a two-phase detection pipeline. In the first phase, answer-level consistency is evaluated by extracting and comparing final answers across multiple responses. In the second phase, detailed analysis using NLI-based consistency scoring, entropy measurement from token log-probabilities, and compression-based complexity analysis is performed. These metrics are combined through a weighted fusion layer to produce a final hallucination risk score.
+
+Experimental evaluation on a custom dataset of 20 diverse questions spanning factual, mathematical, scientific, and logical categories demonstrates the system's capability to distinguish between reliable and hallucinated responses. The system achieves improved precision through the two-phase approach, reducing false positives caused by explanation style variations while maintaining sensitivity to actual hallucinations.
+
+The contributions of this work include: (1) a ground-truth independent detection methodology suitable for open-ended reasoning tasks, (2) integration of metamorphic testing principles with information theory for LLM evaluation, and (3) a practical implementation with a web-based interface for real-time hallucination detection. The findings suggest that combining consistency analysis with information-theoretic measures provides a robust approach to assessing LLM reliability without requiring external knowledge sources.
+
+\vfill
+\textbf{Keywords:} Large Language Models, Hallucination Detection, Metamorphic Testing, Natural Language Inference, Information Theory, Normalized Compression Distance.
+\clearpage

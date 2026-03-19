@@ -1,0 +1,166 @@
+\chapter{Related Work}
+
+This chapter reviews the relevant literature in three main areas: hallucination detection methods for Large Language Models, metamorphic testing in software engineering, and information-theoretic approaches to text analysis.
+
+\section{Hallucination in Large Language Models}
+
+\subsection{Definition and Types of Hallucination}
+
+Hallucination in LLMs refers to the generation of content that is fluent and seemingly plausible but factually incorrect, logically inconsistent, or unsupported by the input context \cite{ji2023survey}. The phenomenon has been categorized into several types:
+
+\begin{itemize}
+    \item \textbf{Factual Hallucination:} Generation of incorrect facts, such as wrong dates, names, or statistics. For example, stating that ``Albert Einstein won the Nobel Prize in Physics in 1905'' when it was actually awarded in 1921.
+
+    \item \textbf{Reasoning Hallucination:} Logical errors in multi-step reasoning tasks where the model produces an incorrect conclusion despite appearing to follow logical steps. This is particularly problematic because the output may ``look'' correct while containing fundamental logical flaws.
+
+    \item \textbf{Intrinsic Hallucination:} Content that contradicts the source material or input context.
+
+    \item \textbf{Extrinsic Hallucination:} Content that cannot be verified from the source material, neither supported nor contradicted.
+\end{itemize}
+
+Understanding these distinctions is crucial because different types of hallucination may require different detection strategies. Our work primarily focuses on reasoning hallucinations in logical tasks, which cannot be easily verified against external knowledge bases.
+
+\subsection{Causes of Hallucination}
+
+Several factors contribute to hallucination in LLMs \cite{huang2023survey}:
+
+\begin{enumerate}
+    \item \textbf{Training Data Issues:} Models may learn incorrect information present in training data, or memorize patterns that do not generalize correctly.
+
+    \item \textbf{Probabilistic Nature:} LLMs generate text by predicting the most likely next token, which optimizes for fluency rather than factual accuracy.
+
+    \item \textbf{Knowledge Cutoff:} Models have a training cutoff date and cannot access information beyond that point.
+
+    \item \textbf{Reasoning Limitations:} Despite impressive performance, LLMs struggle with complex logical reasoning, often failing on problems requiring multiple inference steps.
+\end{enumerate}
+
+\section{Existing Hallucination Detection Methods}
+
+\subsection{Retrieval-Based Methods}
+
+Retrieval-based approaches verify LLM outputs against external knowledge sources. FactScore \cite{min2023factscore} decomposes generated text into atomic facts and verifies each against Wikipedia. While effective for factual claims, this approach has limitations:
+
+\begin{itemize}
+    \item Requires comprehensive, up-to-date knowledge bases
+    \item Cannot handle reasoning tasks where truth depends on logical inference
+    \item May miss hallucinations about obscure topics not covered in knowledge bases
+\end{itemize}
+
+\subsection{Self-Consistency Methods}
+
+SelfCheckGPT \cite{manakul2023selfcheckgpt} proposes sampling multiple responses to the same question and measuring consistency. The intuition is that factual information should be consistently reproduced, while hallucinated content varies across samples. The method computes several consistency metrics:
+
+\begin{equation}
+    \text{BERTScore}(r_1, r_2) = \frac{\sum_{i} \max_j \cos(h_{r_1}^i, h_{r_2}^j)}{|r_1|}
+\end{equation}
+
+where $h_{r}^i$ represents BERT embeddings of tokens in response $r$.
+
+However, self-consistency methods can fail when models produce ``consistent hallucinations'' -- repeatedly generating the same incorrect answer with high confidence. This is particularly common for questions where the model has learned incorrect patterns during training.
+
+\subsection{Uncertainty-Based Methods}
+
+Some approaches leverage model uncertainty signals for hallucination detection. Token-level entropy, computed from log-probabilities, can indicate when a model is uncertain about its predictions:
+
+\begin{equation}
+    H(r) = -\frac{1}{T} \sum_{t=1}^{T} \log p(w_t | w_{<t})
+\end{equation}
+
+High entropy suggests the model is uncertain, which may correlate with hallucination. However, models can also confidently produce incorrect outputs, limiting the effectiveness of uncertainty-based methods alone.
+
+\section{Metamorphic Testing}
+
+\subsection{Principles of Metamorphic Testing}
+
+Metamorphic Testing (MT) is a software testing technique that addresses the ``oracle problem'' -- the challenge of determining expected outputs for complex systems \cite{chen1998metamorphic}. Instead of comparing outputs to expected values, MT verifies that outputs satisfy certain relationships (Metamorphic Relations) across transformed inputs.
+
+\begin{definition}[Metamorphic Relation]
+Given a function $f$ and input transformation $T$, a metamorphic relation $MR$ specifies the expected relationship between $f(x)$ and $f(T(x))$.
+\end{definition}
+
+For example, if $f$ computes the sine function, and $T(x) = \pi - x$, then the metamorphic relation states that $f(x) = f(T(x))$ (since $\sin(x) = \sin(\pi - x)$).
+
+\subsection{Application to Machine Learning}
+
+MT has been successfully applied to test machine learning systems \cite{xie2011testing}, including:
+
+\begin{itemize}
+    \item Image classifiers: Testing that classification is invariant to certain transformations (rotation, scaling)
+    \item Search engines: Verifying that adding irrelevant terms does not change result rankings
+    \item Machine translation: Checking consistency across paraphrased inputs
+\end{itemize}
+
+Our work extends MT principles to LLM evaluation by generating semantically equivalent question variants and checking response consistency. The key insight is that a reliable model should produce consistent answers across different phrasings of the same logical problem.
+
+\section{Information Theory in Text Analysis}
+
+\subsection{Kolmogorov Complexity}
+
+Kolmogorov complexity $K(x)$ measures the length of the shortest program that produces string $x$ \cite{li2008introduction}. While theoretically powerful, Kolmogorov complexity is uncomputable. In practice, compression algorithms provide approximations.
+
+\subsection{Normalized Compression Distance}
+
+The Normalized Compression Distance (NCD) uses compression as a proxy for Kolmogorov complexity \cite{cilibrasi2005clustering}:
+
+\begin{equation}
+    \text{NCD}(x, y) = \frac{C(xy) - \min(C(x), C(y))}{\max(C(x), C(y))}
+\end{equation}
+
+where $C(x)$ denotes the compressed size of $x$ using algorithms like gzip or zlib. NCD has been applied to:
+
+\begin{itemize}
+    \item Plagiarism detection
+    \item Author identification
+    \item Malware classification
+    \item Clustering of biological sequences
+\end{itemize}
+
+In our work, we hypothesize that hallucinated responses may exhibit abnormal compression characteristics -- either unusually repetitive (low NCD) or lacking coherent structure (high NCD compared to correct responses).
+
+\subsection{Entropy in Language Models}
+
+Information entropy quantifies uncertainty in a probability distribution. For language models, token-level entropy measures how uncertain the model is about each prediction:
+
+\begin{equation}
+    H_t = -\sum_{v \in V} p(v | w_{<t}) \log p(v | w_{<t})
+\end{equation}
+
+where $V$ is the vocabulary and $w_{<t}$ are previous tokens. Average entropy across a response provides a global uncertainty measure:
+
+\begin{equation}
+    \bar{H} = \frac{1}{T} \sum_{t=1}^{T} H_t
+\end{equation}
+
+Research suggests that hallucinated content often exhibits different entropy patterns compared to factual content, though the relationship is complex and context-dependent.
+
+\section{Natural Language Inference}
+
+Natural Language Inference (NLI) models classify the logical relationship between a premise and hypothesis into three categories: \textit{Entailment}, \textit{Contradiction}, or \textit{Neutral} \cite{bowman2015large}.
+
+State-of-the-art NLI models like DeBERTa \cite{he2021deberta} achieve high accuracy on benchmark datasets and can be applied to detect semantic contradictions between LLM responses. Given two responses $R_i$ and $R_j$ to semantically equivalent questions, a contradiction label suggests inconsistency that may indicate hallucination.
+
+\section{Bayesian Hyperparameter Optimization}
+
+Multi-signal detection systems require careful calibration of component weights and decision thresholds. Manual tuning is impractical when the search space spans more than a handful of parameters. Bayesian optimization addresses this by building a probabilistic model of the objective function and using it to select promising configurations.
+
+The Tree-structured Parzen Estimator (TPE), as implemented in the Optuna framework, has proven effective for hyperparameter optimization in machine learning systems. Unlike grid search or random search, TPE models the distribution of good and bad parameter configurations separately, enabling efficient exploration of high-dimensional search spaces with relatively few evaluations. This approach is particularly well-suited to our problem, where 13 hyperparameters (signal weights, decision thresholds, NLI parameters, normalization bounds) must be jointly optimized to maximize detection performance.
+
+\section{Hallucination Benchmarks}
+
+The TruthfulQA benchmark comprises 817 questions specifically designed to elicit false beliefs and common misconceptions from language models. Questions span categories including health, law, finance, politics, and conspiracies, making it a comprehensive testbed for hallucination detection systems. Each question includes a ground-truth answer and a set of common incorrect answers, enabling systematic evaluation of both LLM truthfulness and detection system performance.
+
+Other relevant benchmarks include HaluEval, which provides fine-grained hallucination annotations, and FELM, which focuses on faithfulness evaluation. In this thesis, we adopt TruthfulQA as the primary evaluation benchmark due to its size (817 questions), diversity, and widespread adoption in the hallucination detection literature.
+
+\section{Summary and Research Gap}
+
+Existing hallucination detection methods have several limitations:
+
+\begin{enumerate}
+    \item Retrieval-based methods cannot handle reasoning tasks without external knowledge bases
+    \item Self-consistency methods fail on ``consistent hallucinations'' where the model repeatedly produces the same incorrect answer
+    \item Uncertainty methods alone are insufficient as models can confidently hallucinate
+    \item Most methods rely on a single detection signal, limiting robustness
+    \item Few methods address the ground truth leakage problem---where evaluation metrics are inflated by signals that require known correct answers unavailable at inference time
+\end{enumerate}
+
+LOGIC-HALT addresses these gaps by combining five complementary signals: metamorphic testing (to expose inconsistencies through semantic variants), NLI-based consistency analysis (to detect contradictions), information-theoretic metrics (to capture uncertainty and complexity), answer-level majority voting (to detect answer disagreement), and self-verification (to probe logical coherence). These signals are combined through a Bayesian-optimized fusion layer, and the system is explicitly designed to operate without ground-truth answers at inference time. This multi-signal, reference-free approach provides a more robust framework for hallucination detection than any single-method solution.

@@ -241,6 +241,24 @@ class ComplexityAnalyzer:
         compressed = self.zlib.compress(original)
         return len(compressed) / len(original)
 
+    def calculate_pairwise_ncd(self, responses):
+        """Average pairwise NCD across all response pairs."""
+        n = len(responses)
+        if n < 2:
+            return 0.0
+        ncds = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                text1 = responses[i].encode('utf-8')
+                text2 = responses[j].encode('utf-8')
+                c_x = len(self.zlib.compress(text1))
+                c_y = len(self.zlib.compress(text2))
+                c_xy = len(self.zlib.compress(text1 + text2))
+                denom = max(c_x, c_y)
+                ncd_val = (c_xy - min(c_x, c_y)) / denom if denom > 0 else 0.0
+                ncds.append(ncd_val)
+        return float(np.mean(ncds))
+
     def analyze(self, responses: List[Tuple[str, str]], entropy_max=10.0, ncd_max=1.0) -> Tuple[float, float]:
         """Analyze complexity of responses"""
         if not responses:
@@ -262,23 +280,16 @@ class ComplexityAnalyzer:
 # ========================================
 # FUSION & DECISION
 # ========================================
-def calculate_risk(gt_contradiction: float, consistency: float, entropy: float, ncd: float,
-                   alpha: float, beta: float, gamma: float, delta: float) -> float:
-    """
-    Calculate hallucination risk score with ground truth signal as primary indicator.
-
-    Args:
-        gt_contradiction: NLI contradiction score vs ground truth (PRIMARY signal)
-        consistency: Self-consistency score between variants
-        entropy: Token entropy score
-        ncd: Normalized compression distance
-        alpha: Weight for GT contradiction (recommended: 0.50)
-        beta: Weight for inconsistency (recommended: 0.25)
-        gamma: Weight for entropy (recommended: 0.15)
-        delta: Weight for NCD (recommended: 0.10)
-    """
-    inconsistency = 1.0 - consistency
-    risk = alpha * gt_contradiction + beta * inconsistency + gamma * entropy + delta * ncd
+def calculate_risk(self_verification: float, inconsistency: float, entropy: float,
+                   ncd: float, minority_penalty: float,
+                   alpha: float, beta: float, gamma: float,
+                   delta: float, epsilon: float) -> float:
+    """5-signal fusion: Risk = a*SV + b*Incon + g*Entropy + d*NCD + e*MinPenalty"""
+    risk = (alpha * self_verification +
+            beta * inconsistency +
+            gamma * entropy +
+            delta * ncd +
+            epsilon * minority_penalty)
     return min(max(risk, 0.0), 1.0)
 
 
@@ -314,8 +325,10 @@ class BatchOptimizer:
         print("\n[*] Computing labels from LLM responses vs ground truth...")
         self._compute_labels()
 
-        # PRE-COMPUTE all GT contradictions in batch (FAST!)
-        self._precompute_gt_contradictions()
+        # PRE-COMPUTE new 5-signal features
+        self._precompute_self_verification_scores()
+        self._precompute_minority_penalties()
+        self._precompute_pairwise_ncd()
 
         # PRE-COMPUTE all NLI pair scores (run NLI ONCE, apply thresholds per trial)
         self._precompute_nli_scores()
@@ -434,68 +447,124 @@ class BatchOptimizer:
         if DEVICE == 'cuda':
             torch.cuda.empty_cache()
 
-    def _precompute_gt_contradictions(self):
-        """BATCH compute all GT contradiction scores at once - much faster!"""
-        print("\n[*] Pre-computing GT contradictions (BATCH)...")
+    def _precompute_self_verification_scores(self):
+        """Pre-compute self-verification scores using NLI between original and variant responses."""
+        print("\n[*] Pre-computing self-verification scores (BATCH)...")
 
-        answers = []
-        gts = []
+        self.self_verification_cache = {}
+
+        originals = []
+        variants_list = []
         valid_qids = []
 
         for q_id in self.question_ids:
-            gt = self.ground_truths.get(q_id, '')
-            if not gt:
-                continue
-
             orig_resp = self.original_responses.get('responses', {}).get(q_id, {}).get('original', '')
             if not orig_resp:
-                var_resps = self.variant_responses.get('responses', {}).get(q_id, {})
-                if var_resps:
-                    orig_resp = list(var_resps.values())[0]
-
-            if not orig_resp:
                 continue
 
-            answer = self.consistency_analyzer.extract_answer(orig_resp)
-            answers.append(answer)
-            gts.append(gt)
-            valid_qids.append(q_id)
+            var_resps = self.variant_responses.get('responses', {}).get(q_id, {})
+            if not var_resps:
+                continue
 
-        # BATCH inference
-        self.gt_contradiction_cache = {}
+            orig_answer = self.consistency_analyzer.extract_answer(orig_resp)
+            for var_type, var_resp in var_resps.items():
+                var_answer = self.consistency_analyzer.extract_answer(var_resp)
+                originals.append(orig_answer)
+                variants_list.append(var_answer)
+                valid_qids.append(q_id)
+
+        if not originals:
+            for q_id in self.question_ids:
+                self.self_verification_cache[q_id] = 0.0
+            print("   [WARN] No valid pairs for self-verification")
+            return
+
+        # Batch NLI inference
         batch_size = self.consistency_analyzer.batch_size
+        all_contradiction_scores = []
 
         with torch.no_grad():
-            for batch_start in tqdm(range(0, len(answers), batch_size), desc="GT Contradiction Batch"):
-                batch_end = min(batch_start + batch_size, len(answers))
-                batch_answers = answers[batch_start:batch_end]
-                batch_gts = gts[batch_start:batch_end]
-                batch_qids = valid_qids[batch_start:batch_end]
+            for batch_start in tqdm(range(0, len(originals), batch_size), desc="Self-Verification Batch"):
+                batch_end = min(batch_start + batch_size, len(originals))
+                batch_orig = originals[batch_start:batch_end]
+                batch_var = variants_list[batch_start:batch_end]
 
                 inputs = self.consistency_analyzer.tokenizer(
-                    batch_answers, batch_gts,
-                    return_tensors='pt',
-                    truncation=True,
-                    max_length=512,
-                    padding=True
+                    batch_orig, batch_var,
+                    return_tensors='pt', truncation=True, max_length=512, padding=True
                 ).to(self.consistency_analyzer.device)
 
                 outputs = self.consistency_analyzer.model(**inputs)
-                probs = torch.softmax(outputs.logits.float(), dim=-1)  # Back to FP32 for softmax
+                probs = torch.softmax(outputs.logits.float(), dim=-1)
+                contradiction_probs = probs[:, 0].cpu().tolist()
+                all_contradiction_scores.extend(contradiction_probs)
 
-                contradiction_probs = probs[:, 0].cpu().numpy()
-                entailment_probs = probs[:, 2].cpu().numpy()
+        # Aggregate per question (max contradiction)
+        temp_scores = {q_id: [] for q_id in self.question_ids}
+        for idx, q_id in enumerate(valid_qids):
+            temp_scores[q_id].append(all_contradiction_scores[idx])
 
-                for i, q_id in enumerate(batch_qids):
-                    gt_risk = contradiction_probs[i] * 0.7 + (1 - entailment_probs[i]) * 0.3
-                    self.gt_contradiction_cache[q_id] = float(gt_risk)
-
-        # Fill missing with 0
         for q_id in self.question_ids:
-            if q_id not in self.gt_contradiction_cache:
-                self.gt_contradiction_cache[q_id] = 0.0
+            scores = temp_scores.get(q_id, [])
+            self.self_verification_cache[q_id] = max(scores) if scores else 0.0
 
-        print(f"   [OK] Pre-computed {len(self.gt_contradiction_cache)} GT contradictions")
+        print(f"   [OK] Pre-computed self-verification for {len(self.self_verification_cache)} questions")
+
+    def _precompute_minority_penalties(self):
+        """Pre-compute minority penalties using answer extraction and majority voting."""
+        print("\n[*] Pre-computing minority penalties...")
+        import re
+        from collections import Counter
+
+        self.minority_penalty_cache = {}
+
+        for q_id in tqdm(self.question_ids, desc="Minority Penalties"):
+            responses = prepare_responses_for_question(q_id, self.original_responses, self.variant_responses)
+            if len(responses) < 2:
+                self.minority_penalty_cache[q_id] = 0.0
+                continue
+
+            # Extract answers (simple: last number or key phrase)
+            answers = []
+            for _, resp in responses:
+                answer = self.consistency_analyzer.extract_answer(resp)
+                # Get just the core answer (first 50 chars)
+                answers.append(answer[:50].lower().strip() if answer else "")
+
+            valid = [a for a in answers if a]
+            if not valid:
+                self.minority_penalty_cache[q_id] = 0.0
+                continue
+
+            counter = Counter(valid)
+            most_common = counter.most_common(1)[0]
+            majority_ratio = most_common[1] / len(answers)
+
+            # If majority is weak (<60%), apply penalty
+            if majority_ratio < 0.6:
+                self.minority_penalty_cache[q_id] = 0.30
+            elif majority_ratio < 0.8:
+                self.minority_penalty_cache[q_id] = 0.10
+            else:
+                self.minority_penalty_cache[q_id] = 0.0
+
+        print(f"   [OK] Pre-computed minority penalties for {len(self.minority_penalty_cache)} questions")
+
+    def _precompute_pairwise_ncd(self):
+        """Pre-compute pairwise NCD for all questions."""
+        print("\n[*] Pre-computing pairwise NCD...")
+        self.pairwise_ncd_cache = {}
+
+        for q_id in tqdm(self.question_ids, desc="Pairwise NCD"):
+            responses = prepare_responses_for_question(q_id, self.original_responses, self.variant_responses)
+            if len(responses) < 2:
+                self.pairwise_ncd_cache[q_id] = 0.0
+                continue
+
+            response_texts = [r[1] for r in responses]
+            self.pairwise_ncd_cache[q_id] = self.complexity_analyzer.calculate_pairwise_ncd(response_texts)
+
+        print(f"   [OK] Pre-computed pairwise NCD for {len(self.pairwise_ncd_cache)} questions")
 
     def _precompute_nli_scores(self):
         """PRE-COMPUTE all NLI pair scores for all questions.
@@ -573,49 +642,42 @@ class BatchOptimizer:
         print(f"   [OK] Pre-computed NLI scores for {len(self.nli_scores_cache)} questions")
         print(f"   [OK] GPU memory freed - trials will be VERY FAST now!")
 
-    def compute_gt_contradiction(self, q_id):
-        """Get cached GT contradiction score"""
-        return self.gt_contradiction_cache.get(q_id, 0.0)
-
     def compute_features_fast(self, q_id, min_edge_weight, contradiction_weight, neutral_weight,
                               entropy_max, ncd_max):
-        """FAST feature computation using pre-cached NLI scores"""
+        """FAST feature computation using pre-cached scores"""
         nli_scores = self.nli_scores_cache.get(q_id, [])
-
         if not nli_scores:
             return None
 
-        # Apply thresholds to cached scores (NO GPU needed!)
-        contradictions = 0
-        for contr_prob, neut_prob in nli_scores:
-            score = contr_prob * contradiction_weight + neut_prob * neutral_weight
-            if score > min_edge_weight:
-                contradictions += 1
-
+        # Consistency
+        contradictions = sum(1 for contr_prob, neut_prob in nli_scores
+                             if contr_prob * contradiction_weight + neut_prob * neutral_weight > min_edge_weight)
         consistency = 1.0 - (contradictions / len(nli_scores))
 
-        # Get cached complexity (scale by parameters)
-        base_entropy, base_ncd = self.complexity_cache.get(q_id, (0.0, 0.0))
-        entropy = min(base_entropy * 10.0 / entropy_max, 1.0)  # Rescale
-        ncd = min(base_ncd / ncd_max, 1.0)
+        # Entropy
+        base_entropy, _ = self.complexity_cache.get(q_id, (0.0, 0.0))
+        entropy = min(base_entropy * 10.0 / entropy_max, 1.0)
 
-        gt_contradiction = self.compute_gt_contradiction(q_id)
+        # Pairwise NCD
+        raw_ncd = self.pairwise_ncd_cache.get(q_id, 0.0)
+        ncd = min(raw_ncd / ncd_max, 1.0)
 
-        return (consistency, entropy, ncd, gt_contradiction)
+        # Self-verification
+        self_verification = self.self_verification_cache.get(q_id, 0.0)
+
+        # Minority penalty
+        minority_penalty = self.minority_penalty_cache.get(q_id, 0.0)
+
+        return (consistency, entropy, ncd, self_verification, minority_penalty)
 
     def objective(self, trial: optuna.Trial) -> float:
-        """Optuna objective function with ground truth signal as primary feature"""
-        # Sample hyperparameters for new 4-weight fusion
-        # Weights must sum to 1.0 and all be positive
-        alpha = trial.suggest_float('alpha', 0.10, 0.70)  # GT contradiction weight (PRIMARY)
-        beta = trial.suggest_float('beta', 0.05, 0.40)    # Inconsistency weight
-        gamma = trial.suggest_float('gamma', 0.05, 0.40)  # Entropy weight
-        delta = 1.0 - alpha - beta - gamma                # NCD weight (remainder)
+        alpha = trial.suggest_float('alpha', 0.05, 0.50)   # Self-verification
+        beta = trial.suggest_float('beta', 0.05, 0.40)     # Inconsistency
+        gamma = trial.suggest_float('gamma', 0.05, 0.30)   # Entropy
+        delta = trial.suggest_float('delta', 0.01, 0.30)   # NCD
+        epsilon = 1.0 - alpha - beta - gamma - delta        # Minority penalty
 
-        # Ensure all weights are valid (positive and sum to 1)
-        if delta < 0.0 or delta > 0.50:
-            return 0.0
-        if alpha + beta + gamma + delta > 1.01 or alpha + beta + gamma + delta < 0.99:
+        if epsilon < 0.0 or epsilon > 0.40:
             return 0.0
 
         threshold = trial.suggest_float('hallucination_threshold', 0.20, 0.70)
@@ -625,7 +687,6 @@ class BatchOptimizer:
         entropy_max = trial.suggest_float('entropy_max', 5.0, 15.0)
         ncd_max = trial.suggest_float('ncd_max', 0.50, 1.00)
 
-        # Evaluate on all questions (using PRE-CACHED NLI scores - NO GPU!)
         predictions = []
         ground_truths = []
 
@@ -633,12 +694,14 @@ class BatchOptimizer:
             features = self.compute_features_fast(
                 q_id, min_edge_weight, contradiction_weight, neutral_weight, entropy_max, ncd_max
             )
-
             if features is None:
                 continue
 
-            consistency, entropy, ncd, gt_contradiction = features
-            risk = calculate_risk(gt_contradiction, consistency, entropy, ncd, alpha, beta, gamma, delta)
+            consistency, entropy, ncd, self_verification, minority_penalty = features
+            inconsistency = 1.0 - consistency
+
+            risk = calculate_risk(self_verification, inconsistency, entropy, ncd,
+                                  minority_penalty, alpha, beta, gamma, delta, epsilon)
             pred = 1 if risk > threshold else 0
 
             predictions.append(pred)
@@ -647,8 +710,7 @@ class BatchOptimizer:
         if len(predictions) < 10:
             return 0.0
 
-        f1 = f1_score(ground_truths, predictions, zero_division=0)
-        return f1
+        return f1_score(ground_truths, predictions, zero_division=0)
 
     def optimize(self, n_trials=100, timeout=None):
         """Run Bayesian optimization"""
@@ -692,28 +754,29 @@ class BatchOptimizer:
         print(f"{'='*60}")
 
         best = study.best_params
-        delta = 1.0 - best['alpha'] - best['beta'] - best['gamma']
+        epsilon = 1.0 - best['alpha'] - best['beta'] - best['gamma'] - best['delta']
 
         print(f"\n[*] Best F1 Score: {study.best_value:.4f}")
         print(f"   Total trials: {len(study.trials)}")
-        print(f"\n[*] Optimal Hyperparameters (4-weight fusion):")
-        print(f"   alpha (GT Contradiction): {best['alpha']:.4f}  <- PRIMARY signal")
-        print(f"   beta  (Inconsistency):    {best['beta']:.4f}")
-        print(f"   gamma (Entropy):          {best['gamma']:.4f}")
-        print(f"   delta (NCD):              {delta:.4f}")
-        print(f"   Threshold:            {best['hallucination_threshold']:.4f}")
+        print(f"\n[*] Optimal Hyperparameters (5-weight fusion, NO GT contradiction):")
+        print(f"   alpha   (Self-Verification): {best['alpha']:.4f}")
+        print(f"   beta    (Inconsistency):     {best['beta']:.4f}")
+        print(f"   gamma   (Entropy):           {best['gamma']:.4f}")
+        print(f"   delta   (NCD):               {best['delta']:.4f}")
+        print(f"   epsilon (Minority Penalty):  {epsilon:.4f}")
+        print(f"   Threshold:                   {best['hallucination_threshold']:.4f}")
 
     def _save_results(self, study):
         OUTPUT_DIR.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
         best_params = study.best_params.copy()
-        best_params['delta'] = 1.0 - best_params['alpha'] - best_params['beta'] - best_params['gamma']
+        best_params['epsilon'] = 1.0 - best_params['alpha'] - best_params['beta'] - best_params['gamma'] - best_params['delta']
         best_params['best_f1_score'] = study.best_value
         best_params['n_trials'] = len(study.trials)
         best_params['timestamp'] = timestamp
         best_params['n_questions'] = len(self.question_ids)
-        best_params['fusion_type'] = '4-weight with GT contradiction'
+        best_params['fusion_type'] = '5-weight without GT contradiction'
 
         json_path = OUTPUT_DIR / f'batch_optimization_best_params.json'
         with open(json_path, 'w') as f:

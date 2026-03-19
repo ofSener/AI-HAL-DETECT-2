@@ -1,0 +1,95 @@
+\chapter{Introduction}
+
+\section{Background and Motivation}
+
+Large Language Models (LLMs) such as GPT-4 \cite{openai2023gpt4}, Claude, and Llama have fundamentally transformed the landscape of natural language processing and artificial intelligence. Built upon the Transformer architecture \cite{vaswani2017attention} and trained on vast corpora of text data, these models demonstrate remarkable capabilities across a wide range of tasks, including question answering, logical reasoning, summarization, and code generation \cite{brown2020language}. Their outputs are often fluent, coherent, and stylistically indistinguishable from human-written text, which has led to their rapid adoption in both academic and industrial applications.
+
+However, alongside these impressive capabilities lies a fundamental and well-documented limitation: LLMs \textit{hallucinate}. Hallucination refers to the tendency of language models to generate text that is fluent and confident yet factually incorrect, logically inconsistent, or entirely fabricated \cite{ji2023survey}. Unlike human experts who typically express uncertainty or qualify their statements when unsure, LLMs present hallucinated content with the same surface-level confidence as veridical information, making it exceedingly difficult for end users to distinguish reliable outputs from fabricated ones \cite{manakul2023selfcheckgpt}. This problem has been identified as one of the most critical barriers to the trustworthy deployment of LLMs in high-stakes domains such as healthcare, legal reasoning, financial analysis, and autonomous decision-making \cite{kaur2022trustworthy}.
+
+The severity of the hallucination problem is amplified by its heterogeneous nature. Factual hallucinations---where the model produces incorrect dates, names, or statistics---can potentially be verified against external knowledge bases such as Wikipedia. Reasoning hallucinations, however, are fundamentally more challenging to detect. In such cases, the model may produce a perfectly grammatical and seemingly logical argument that nevertheless contains a subtle but critical logical flaw. For instance, an LLM might correctly state the premises of a syllogism but arrive at an invalid conclusion, or it might introduce an unstated assumption that invalidates the entire chain of reasoning \cite{liu2023evaluating}. Because the ``truth'' in reasoning tasks depends on logical inference rather than factual lookup, external knowledge bases offer no recourse, and the correctness of such outputs can only be assessed through internal analysis of the reasoning structure itself.
+
+Furthermore, hallucination rates remain disturbingly high even in state-of-the-art models. Studies have shown that modern LLMs can hallucinate on a significant fraction of queries, particularly on questions designed to elicit common misconceptions, false beliefs, or logically tricky formulations \cite{huang2023survey}. The TruthfulQA benchmark, which comprises 817 questions specifically designed to probe such failure modes, has demonstrated that even the most capable models frequently produce confident but incorrect responses across categories including health, law, finance, and common misconceptions. This underscores the urgent need for automated, scalable, and reliable methods to detect hallucinations without requiring human verification for every output.
+
+Existing approaches to hallucination detection broadly fall into two paradigms. Retrieval-based methods, such as FActScore \cite{min2023factscore}, decompose generated text into atomic claims and verify each claim against external knowledge sources. While effective for factual verification, these methods inherently depend on the availability of comprehensive and up-to-date knowledge bases, and they are inapplicable to reasoning tasks where correctness cannot be looked up. Self-consistency methods, such as SelfCheckGPT \cite{manakul2023selfcheckgpt}, sample multiple responses to the same prompt and measure agreement across samples under the intuition that factual knowledge is reproducibly recalled. However, these methods can be defeated by \textit{consistent hallucinations}---situations where the model repeatedly produces the same incorrect answer with high confidence across all samples, yielding high apparent consistency despite factual error.
+
+These limitations motivate the development of a more robust, multi-signal approach that combines complementary detection strategies. The ideal system would operate without requiring ground-truth answers at inference time, would be resilient to consistent hallucinations, and would provide interpretable risk scores rather than binary decisions. This thesis addresses these requirements through the design, implementation, and evaluation of LOGIC-HALT.
+
+\section{Problem Statement}
+
+The core problem addressed in this thesis is the \textbf{reference-free detection of hallucinations} in LLM responses without relying on ground-truth answers, external knowledge bases, or human annotations at inference time. Specifically, we aim to answer the following research question:
+
+\textit{Can we reliably detect hallucinations in LLM responses by fusing multiple complementary signals---including self-verification, cross-response consistency, information-theoretic complexity, and answer-level agreement---through an automatically optimized decision framework?}
+
+This problem poses several interconnected challenges:
+
+\begin{enumerate}
+    \item \textbf{The Oracle Problem:} In logical reasoning and open-ended question answering, the correct answer may not be readily available for comparison. Any detection system must therefore operate without ground-truth references during inference, relying solely on properties of the model's own outputs.
+
+    \item \textbf{Consistent Hallucinations:} A model that consistently produces the same incorrect answer across multiple queries cannot be detected by consistency analysis alone. Detection must incorporate additional signals that capture uncertainty or structural anomalies even when surface-level responses appear uniform.
+
+    \item \textbf{Style-Induced False Positives:} When comparing multiple LLM responses, natural variation in explanation style, word choice, and reasoning presentation can be mistaken for semantic inconsistency by Natural Language Inference (NLI) models. A detection system must distinguish genuine contradictions from superficial stylistic differences.
+
+    \item \textbf{Metric Insufficiency:} No single metric---whether consistency, entropy, compression distance, or answer agreement---is individually sufficient for reliable hallucination detection. Each captures different aspects of model behavior, and an effective system must combine them in a principled manner.
+
+    \item \textbf{Hyperparameter Sensitivity:} Multi-signal fusion systems are sensitive to the relative weighting of their component signals and to decision thresholds. Manual tuning is unlikely to find optimal configurations, especially across diverse question types and difficulty levels.
+
+    \item \textbf{Ground Truth Leakage:} A critical but subtle pitfall in hallucination detection research is the inadvertent use of ground-truth information during evaluation in ways that would not be available during real-world inference. If a signal relies on comparing model outputs to known correct answers, the reported performance may be artificially inflated and unattainable in practice.
+\end{enumerate}
+
+Our approach addresses each of these challenges through a combination of metamorphic testing principles, multi-signal analysis, two-phase detection, and Bayesian hyperparameter optimization, as detailed in the following section.
+
+\section{Proposed Solution: LOGIC-HALT}
+
+This thesis presents LOGIC-HALT (\textbf{LOG}ical \textbf{I}nconsistency and \textbf{C}ompression-based \textbf{HAL}lucination \textbf{T}esting), a multi-signal hallucination detection framework that combines five complementary signals through a Bayesian-optimized fusion layer. The system is designed as a modular, six-stage pipeline consisting of the following components:
+
+\begin{enumerate}
+    \item \textbf{Module A -- The Morpher (Variant Generation):} Generates semantically equivalent variants of the input question using LLM-guided metamorphic transformations---including syntactic paraphrasing, logical equivalence (contrapositive), variable substitution, premise reordering, and redundant context injection. Each variant is validated through Sentence-BERT \cite{reimers2019sentence} cosine similarity to ensure semantic preservation above a configurable threshold.
+
+    \item \textbf{Module B -- The Interrogator (Response Collection):} Queries the target LLM with both the original question and all generated variants, collecting structured responses in a HYBRID format that explicitly separates the final answer from the supporting reasoning. Token-level log-probabilities are captured alongside each response for subsequent entropy analysis.
+
+    \item \textbf{Module C -- The Consistency Engine (NLI Analysis):} Evaluates semantic consistency across responses using a pre-trained Natural Language Inference model (DeBERTa-v3 \cite{he2021deberta}). Pairwise NLI classifications are used to construct a contradiction matrix, from which graph-based consistency metrics---including contradiction density, clustering coefficient, and average contradiction strength---are derived. Crucially, NLI comparison is performed on the extracted \textit{answer portions} of responses rather than full texts, mitigating false positives caused by explanation style variation. A self-verification signal is also computed by asking the model to verify its own initial answer through an additional NLI-based consistency check.
+
+    \item \textbf{Module D -- The Complexity Engine (Information Theory):} Computes two information-theoretic metrics that capture orthogonal aspects of response quality. Token entropy, derived from log-probabilities, measures the model's internal uncertainty during generation \cite{huang2023survey}. Normalized Compression Distance (NCD), computed as pairwise compression-based similarity across responses \cite{cilibrasi2005clustering}, captures structural redundancy and coherence patterns. Both metrics are normalized to $[0, 1]$ through calibrated transformations.
+
+    \item \textbf{Module E -- The Fusion Layer (Bayesian-Optimized Decision):} Combines the five signals---Self-Verification, Inconsistency, Entropy, NCD, and Minority Penalty---through a weighted linear combination to produce a continuous hallucination risk score. The weights and decision threshold are optimized using Bayesian optimization via the Tree-structured Parzen Estimator (TPE) sampler, implemented through the Optuna framework with 500 optimization trials.
+
+    \item \textbf{Module F -- The Answer Validator (Majority Voting):} Extracts final answers from all collected responses using pattern matching, performs majority voting to identify the consensus answer, and applies a configurable minority penalty to responses that disagree with the majority. This module provides both a fast-track classification path (when answer agreement exceeds 80\%, the question is classified as safe without full analysis) and an additional signal for the fusion layer.
+\end{enumerate}
+
+The complete detection pipeline implements a two-phase strategy. In the first phase, the Answer Validator performs a rapid answer-level consistency check. If sufficient agreement is found among extracted answers, the system returns a low-risk classification immediately, avoiding the computational overhead of full NLI and complexity analysis. In the second phase, triggered when answer-level consistency is below the fast-track threshold, the system performs detailed multi-signal analysis through the Consistency Engine, Complexity Engine, and self-verification, combining all signals in the Fusion Layer for a final decision.
+
+A critical design decision in LOGIC-HALT concerns the elimination of ground-truth dependency. During the development of this system, we discovered that the original evaluation framework incorporated a Ground Truth (GT) Contradiction signal that compared model outputs against known correct answers using NLI. While this signal was highly informative during evaluation (accounting for over 60\% of the fusion weight in the original 4-signal configuration), it is fundamentally unavailable during real-world inference, where the correct answer is not known. Retaining this signal would yield performance metrics that are misleadingly optimistic and unattainable in practice. We therefore replaced the GT Contradiction signal with two inference-time-available proxy signals---Self-Verification (where the model verifies its own answer) and Minority Penalty (from answer-level majority voting)---and re-optimized all hyperparameters from scratch. The resulting 5-signal system reports honest metrics that reflect true deployment performance.
+
+\section{Contributions}
+
+The main contributions of this thesis are as follows:
+
+\begin{enumerate}
+    \item \textbf{A Reference-Free, Multi-Signal Detection Framework:} We propose LOGIC-HALT, a hallucination detection framework that operates entirely without ground-truth answers at inference time. The system combines five complementary signals---Self-Verification, Inconsistency, Entropy, NCD, and Minority Penalty---through a weighted fusion layer, providing more robust detection than any single-signal approach. To our knowledge, this is the first system to combine metamorphic testing, NLI-based consistency analysis, information-theoretic complexity measures, and answer-level majority voting in a unified pipeline for hallucination detection.
+
+    \item \textbf{Identification and Correction of Ground Truth Leakage:} We identify a critical methodological issue in multi-signal hallucination detection: the inadvertent use of ground-truth information as a detection signal during evaluation, which inflates reported metrics to levels unattainable during real-world inference. We correct this by replacing the ground-truth-dependent signal with inference-time proxy signals and re-optimizing the entire system, yielding honest and reproducible performance metrics.
+
+    \item \textbf{Bayesian Hyperparameter Optimization:} We demonstrate the effectiveness of Bayesian optimization using the Tree-structured Parzen Estimator (TPE) for jointly optimizing 13 hyperparameters across all system components. Over 500 optimization trials on the TruthfulQA benchmark (817 questions), we achieve an F1 score of 0.727 with Precision = 0.602 and Recall = 0.917 under a precision-balanced objective, representing a practical operating point for reference-free deployment.
+
+    \item \textbf{Two-Phase Detection Pipeline:} We introduce an efficient two-phase detection strategy that first performs a fast answer-level consistency check using majority voting before proceeding to computationally expensive NLI and information-theoretic analysis. This design reduces both computational cost and false positives caused by explanation style variation, while maintaining high recall for genuine hallucinations.
+
+    \item \textbf{Comprehensive Ablation Study:} We conduct a systematic ablation study across 8 signal combinations to quantify the contribution of each signal to overall detection performance. This analysis reveals the relative importance of each component and validates the necessity of multi-signal fusion.
+
+    \item \textbf{Practical GPU-Optimized Implementation:} We provide a complete, modular implementation evaluated on consumer-grade hardware (NVIDIA RTX 5070 with 12\,GB VRAM, CUDA 12.8), demonstrating that effective hallucination detection is achievable without enterprise-grade computational resources. The system includes a web-based interface for real-time analysis and is designed for extensibility to additional LLM providers and signal types.
+\end{enumerate}
+
+\section{Thesis Organization}
+
+The remainder of this thesis is organized as follows:
+
+\begin{itemize}
+    \item \textbf{Chapter 2: Related Work} reviews existing approaches to hallucination detection in LLMs, including retrieval-based methods, self-consistency methods, and uncertainty-based methods. It also covers metamorphic testing principles, Natural Language Inference, and information-theoretic approaches to text analysis, establishing the theoretical foundations upon which LOGIC-HALT is built.
+
+    \item \textbf{Chapter 3: Methodology} presents the detailed architecture of the LOGIC-HALT system, describing the six modules (Morpher, Interrogator, Consistency Engine, Complexity Engine, Fusion Layer, and Answer Validator), their mathematical formulations, the five-signal fusion mechanism, and the Bayesian optimization procedure.
+
+    \item \textbf{Chapter 4: Experimental Setup} describes the implementation details, including the technology stack, NLI model selection, and target LLM configuration. It details the evaluation on the TruthfulQA benchmark (817 questions), defines the evaluation metrics, and specifies the hardware environment (RTX 5070, CUDA 12.8) and experimental parameters.
+
+    \item \textbf{Chapter 5: Results and Discussion} presents the experimental results, including overall performance metrics (F1 = 0.727, Precision = 0.602, Recall = 0.917), the ablation study across 8 signal combinations, threshold analysis, and a detailed discussion of the ground truth leakage issue and its resolution.
+
+    \item \textbf{Chapter 6: Conclusion} summarizes the findings and contributions, discusses limitations of the current approach, and outlines directions for future research including cross-model generalization, domain-specific fine-tuning, and integration with external knowledge sources.
+\end{itemize}

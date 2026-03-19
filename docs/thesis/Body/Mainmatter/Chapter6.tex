@@ -1,0 +1,97 @@
+\chapter{Conclusion}
+
+This chapter summarizes the contributions of this thesis, discusses the implications of the findings, and outlines directions for future research.
+
+\section{Summary of Contributions}
+
+This thesis presented LOGIC-HALT, a multi-signal hallucination detection framework for Large Language Model outputs. The system was designed, implemented, and evaluated with the explicit goal of operating without ground-truth answers at inference time. The main contributions are:
+
+\begin{enumerate}
+    \item \textbf{Five-Signal Fusion Architecture:} We developed a modular pipeline combining five complementary signals---Self-Verification, Inconsistency (NLI-based), Token Entropy, Pairwise NCD, and Minority Penalty---through a Bayesian-optimized weighted fusion layer. Evaluation on the TruthfulQA benchmark (817 questions) yielded F1 = 0.727, Precision = 0.602, and Recall = 0.917 under precision-balanced optimization.
+
+    \item \textbf{Ground Truth Leakage Identification:} We identified and corrected a critical methodological flaw where the original system used ground-truth answers as a detection signal during evaluation. This signal (GT Contradiction) accounted for 63.8\% of the fusion weight and produced artificially inflated metrics (Precision = 0.977). We replaced it with inference-time-available proxy signals and reported honest metrics.
+
+    \item \textbf{Bayesian Hyperparameter Optimization:} Using Optuna's TPE sampler with 500 trials, we jointly optimized 13 hyperparameters across all system modules, achieving systematic and reproducible parameter selection on the 817-question TruthfulQA benchmark.
+
+    \item \textbf{Comprehensive Ablation Study:} We tested 8 signal combinations (3 additional signals $\times$ all combinations) to quantify the marginal contribution of each signal. The ablation revealed that Minority Penalty (answer-level majority voting) is the strongest single signal (39.19\% weight), and that Negation Contradiction is the only additional signal that improves precision.
+
+    \item \textbf{Two-Phase Detection:} We implemented an efficient pipeline where a fast answer-level consistency check precedes full NLI and information-theoretic analysis, reducing both computational cost and style-induced false positives.
+
+    \item \textbf{GPU-Optimized Implementation:} The complete system runs on consumer hardware (NVIDIA RTX 5070, 12\,GB VRAM) with CUDA optimizations including FP16 inference and batch NLI processing, and includes a Flask-based web interface for real-time analysis.
+\end{enumerate}
+
+\section{Key Findings}
+
+The experimental evaluation yielded several important insights:
+
+\begin{enumerate}
+    \item \textbf{Answer-Level Voting Outperforms NLI Consistency:} The simplest signal---regex-based answer extraction with majority voting---proved more discriminative than the sophisticated NLI-based consistency analysis. This suggests that for hallucination detection, \textit{what} the model says (the final answer) matters more than \textit{how} it says it (the explanation text).
+
+    \item \textbf{Consistency $\neq$ Correctness:} All five signals measure variations of inter-response agreement. Without access to external knowledge or ground truth, the system cannot distinguish ``wrong but consistent'' responses from correct ones. This fundamental limitation caps precision at approximately 60\%.
+
+    \item \textbf{Negation Probing Provides Unique Information:} Among the three additional signals tested, only Negation Contradiction improved precision (0.578 $\rightarrow$ 0.606). By testing whether the model agrees with both a claim and its logical negation, this signal captures a qualitatively different type of failure---logical incoherence rather than simple inconsistency.
+
+    \item \textbf{GT Leakage is a Real Risk:} The original 4-signal system's reported Precision of 0.977 was unattainable in practice because it relied on ground truth at inference time. This serves as a cautionary finding for the broader hallucination detection community: evaluation metrics must reflect realistic deployment conditions.
+
+    \item \textbf{High Recall is Achievable:} Even without ground truth, the system detects 91.5\% of hallucinations, making it highly effective as a screening tool when combined with human review.
+\end{enumerate}
+
+\section{Limitations}
+
+Several limitations should be acknowledged:
+
+\begin{enumerate}
+    \item \textbf{Precision Ceiling:} The system cannot exceed $\sim$60\% precision without external knowledge sources or a stronger verification model. This limits standalone deployment in high-precision applications.
+
+    \item \textbf{Single Model Evaluation:} All experiments used GPT-4o-mini as the target LLM. Hallucination patterns may differ across models (GPT-4, Claude, Llama, Mistral), and cross-model generalization was not evaluated.
+
+    \item \textbf{Consistent Hallucinations:} When the model confidently and repeatedly produces the same wrong answer across all variants, all consistency-based signals fail to detect the hallucination.
+
+    \item \textbf{Computational Cost:} Generating 5 variants + 1 verification query requires 7 LLM API calls per question, plus pairwise NLI analysis ($O(n^2)$). This may be prohibitive for high-throughput applications.
+
+    \item \textbf{English-Only Evaluation:} The system was evaluated only on English-language questions (TruthfulQA). Performance on other languages is unknown.
+\end{enumerate}
+
+\section{Future Work}
+
+Based on the findings and limitations of this thesis, we identify several promising directions for future research:
+
+\subsection{Short-Term Improvements}
+
+\begin{enumerate}
+    \item \textbf{External Knowledge Integration:} Adding a retrieval-augmented signal that fact-checks key claims against Wikipedia or Wikidata could provide the ``correctness'' signal that is currently missing, potentially breaking the precision ceiling.
+
+    \item \textbf{Stronger Verification Model:} Using GPT-4o (instead of GPT-4o-mini) for self-verification could improve the quality of the verification signal, as larger models have better factual knowledge.
+
+    \item \textbf{Cross-Model Consistency:} Querying multiple LLMs (GPT-4o, Claude, Gemini) with the same question and comparing their answers would provide a stronger consistency signal than single-model variant analysis.
+\end{enumerate}
+
+\subsection{Medium-Term Extensions}
+
+\begin{enumerate}
+    \item \textbf{Multi-Benchmark Evaluation:} Extend evaluation to additional benchmarks including HaluEval, FELM, and domain-specific datasets (medical, legal) to assess generalization.
+
+    \item \textbf{Learned Fusion:} Replace the linear weighted fusion with a trained classifier (e.g., gradient-boosted trees or a small neural network) that can capture non-linear interactions between signals.
+
+    \item \textbf{Token-Level Confidence Analysis:} Instead of average entropy, analyze entropy patterns at factual claim positions (names, numbers, dates) to detect localized uncertainty spikes.
+\end{enumerate}
+
+\subsection{Long-Term Research Directions}
+
+\begin{enumerate}
+    \item \textbf{Self-Correction Integration:} Combine detection with automatic correction---when a hallucination is flagged, use the verification signal and variant responses to generate a corrected answer.
+
+    \item \textbf{Formal Verification:} For logical reasoning tasks specifically, integrate symbolic logic solvers to formally verify the validity of reasoning chains.
+
+    \item \textbf{Theoretical Foundations:} Develop formal bounds on the precision achievable by consistency-based methods as a function of signal diversity and model behavior, providing theoretical guidance for system design.
+\end{enumerate}
+
+\section{Concluding Remarks}
+
+Large Language Models represent a transformative technology, but their tendency to hallucinate remains a critical barrier to trustworthy deployment. This thesis contributes to addressing this challenge through LOGIC-HALT, a practical framework that detects hallucinations without requiring ground-truth answers at inference time.
+
+Our work demonstrates both the potential and the limitations of consistency-based detection. On one hand, by combining five complementary signals through Bayesian-optimized fusion, we achieve high recall (91.5\%) suitable for screening applications. On the other hand, the fundamental insight that consistency does not imply correctness establishes a clear boundary: without external knowledge sources, precision remains bounded.
+
+Perhaps the most significant contribution of this thesis is methodological: the identification and correction of the ground truth leakage problem. We believe that honest reporting of inference-time metrics---rather than evaluation-time metrics that rely on unavailable information---should be a standard practice in hallucination detection research. We hope this work encourages the community to critically examine evaluation protocols and report metrics that accurately reflect real-world deployment performance.
+
+The source code, evaluation results, and web interface are available for further research and development.
